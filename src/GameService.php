@@ -80,7 +80,7 @@ final class GameService
             $s=$this->one('SELECT * FROM scenarios WHERE id=? FOR UPDATE',[$scenarioId]);
             if(!$s) throw new RuntimeException('Escenario inexistente.');
             $this->assertMember((int)$s['campaign_id'],(int)$user['id']);
-            $dmOnly=['scenario.activate','scenario.deactivate','map.cells.paint','object.create','objects.bulk_update','tokens.bulk_update','tokens.delete','npc.create','token.update','token.delete','token.move_dm','movement.approve','movement.reject','encounter.prepare','encounter.start','encounter.stop','initiative.set','initiative.reorder_tie','turn.next','turn.delay_order','health.set','cell.note','player.note'];
+            $dmOnly=['scenario.activate','scenario.deactivate','map.cells.paint','object.create','objects.bulk_update','tokens.bulk_update','tokens.delete','npc.create','token.update','token.delete','token.clone','token.move_dm','movement.approve','movement.reject','encounter.prepare','encounter.start','encounter.stop','initiative.set','initiative.reorder_tie','turn.next','turn.delay_order','health.set','cell.note','player.note'];
             if(in_array($type,$dmOnly,true) && $user['role']!=='DM') throw new RuntimeException('Acción exclusiva del DM.');
             $data=match($type){
                 'scenario.activate'=>$this->activate($scenarioId,true),
@@ -95,6 +95,7 @@ final class GameService
                 'npc.create'=>$this->createNpc($s,$p,$user),
                 'token.update'=>$this->updateToken($s,$p),
                 'token.delete'=>$this->deleteToken($s,$p),
+                'token.clone'=>$this->cloneToken($s,$p),
                 'token.move_dm'=>$this->moveDm($s,$p),
                 'player.place'=>$this->placePlayer($s,$user,$p),
                 'movement.submit'=>$this->submitMovement($s,$user,$p),
@@ -139,7 +140,17 @@ final class GameService
     private function createObject(array $s,array $p): array { [$x,$y]=$this->coords($s,$p);$width=(int)($p['widthCells']??1);$height=(int)($p['heightCells']??1);$this->validateObjectSize($s,$x,$y,$width,$height);$this->db->prepare('INSERT INTO map_objects(scenario_id,name,x,y,width_cells,height_cells,notes,visible,image_asset_id) VALUES (?,?,?,?,?,?,?,?,?)')->execute([$s['id'],trim((string)($p['name']??'Objeto'))?:'Objeto',$x,$y,$width,$height,$p['notes']??null,!empty($p['visible'])?1:0,$p['imageAssetId']??null]);return ['id'=>(int)$this->db->lastInsertId(),'kind'=>'OBJECT','x'=>$x,'y'=>$y,'widthCells'=>$width,'heightCells'=>$height]; }
     private function bulkUpdateObjects(array $s,array $p): array { $ids=array_values(array_unique(array_filter(array_map('intval',(array)($p['objectIds']??[])),fn($id)=>$id>0)));if(!$ids||count($ids)>200)throw new RuntimeException('Selecciona entre 1 y 200 objetos.');$sets=[];$values=[];if(array_key_exists('visible',$p)){$sets[]='visible=?';$values[]=!empty($p['visible'])?1:0;}if(array_key_exists('image_asset_id',$p)){$sets[]='image_asset_id=?';$values[]=(int)$p['image_asset_id'];}if(!$sets)throw new RuntimeException('No hay cambios para aplicar.');$placeholders=implode(',',array_fill(0,count($ids),'?'));$values[]=$s['id'];array_push($values,...$ids);$this->db->prepare('UPDATE map_objects SET '.implode(',',$sets)." WHERE scenario_id=? AND id IN ($placeholders)")->execute($values);return ['objectIds'=>$ids,'updated'=>$this->db->query('SELECT ROW_COUNT()')->fetchColumn()]; }
     private function bulkUpdateTokens(array $s,array $p): array { $items=array_slice((array)($p['items']??[]),0,201);if(!$items||count($items)>200)throw new RuntimeException('Selecciona entre 1 y 200 elementos.');$objects=[];$npcs=[];foreach($items as $item){$kind=strtoupper((string)($item['kind']??''));$id=(int)($item['id']??0);if($id<1)continue;if($kind==='OBJECT')$objects[]=$id;elseif($kind==='NPC')$npcs[]=$id;else throw new RuntimeException('Tipo de elemento no permitido.');}$objects=array_values(array_unique($objects));$npcs=array_values(array_unique($npcs));if(!$objects&&!$npcs)throw new RuntimeException('Selección inválida.');$sets=[];$values=[];if(array_key_exists('visible',$p)){$sets[]='visible=?';$values[]=!empty($p['visible'])?1:0;}if(array_key_exists('image_asset_id',$p)){$sets[]='image_asset_id=?';$values[]=(int)$p['image_asset_id'];}if(!$sets)throw new RuntimeException('No hay cambios para aplicar.');$updated=0;foreach([['map_objects',$objects],['npc_characters',$npcs]] as [$table,$ids]){if(!$ids)continue;$placeholders=implode(',',array_fill(0,count($ids),'?'));$params=$values;$params[]=$s['id'];array_push($params,...$ids);$q=$this->db->prepare("UPDATE $table SET ".implode(',',$sets)." WHERE scenario_id=? AND id IN ($placeholders)");$q->execute($params);$updated+=$q->rowCount();}return ['items'=>$items,'updated'=>$updated]; }
-    private function createNpc(array $s,array $p,array $user): array { [$x,$y]=$this->coords($s,$p); $imageAssetId=$p['imageAssetId']??null; $stats=[]; if(!empty($p['codexCreatureId'])){$cid=(int)$p['codexCreatureId']; if(!$imageAssetId) $imageAssetId=$this->codexCreatureAssetId($user,$cid); $stats=$this->codexCreatureStats($cid);} $health=array_key_exists('health',$p)?(int)$p['health']:(int)($stats['health']??1); $armorClass=array_key_exists('armorClass',$p)&&$p['armorClass']!==''?(int)$p['armorClass']:($stats['armorClass']??null); $this->db->prepare('INSERT INTO npc_characters(scenario_id,name,x,y,notes,health,armor_class,initiative,visible,image_asset_id) VALUES (?,?,?,?,?,?,?,?,?,?)')->execute([$s['id'],trim((string)($p['name']??'NPC'))?:'NPC',$x,$y,$p['notes']??null,$health,$armorClass,isset($p['initiative'])?(int)$p['initiative']:null,!empty($p['visible'])?1:0,$imageAssetId]); return ['id'=>(int)$this->db->lastInsertId(),'kind'=>'NPC','x'=>$x,'y'=>$y]; }
+    private function createNpc(array $s,array $p,array $user): array { [$x,$y]=$this->coords($s,$p); $imageAssetId=$p['imageAssetId']??null; $stats=[]; $codexCreatureId=!empty($p['codexCreatureId'])?(int)$p['codexCreatureId']:null; if($codexCreatureId){ if(!$imageAssetId) $imageAssetId=$this->codexCreatureAssetId($user,$codexCreatureId); $stats=$this->codexCreatureStats($codexCreatureId);} $health=array_key_exists('health',$p)?(int)$p['health']:(int)($stats['health']??1); $armorClass=array_key_exists('armorClass',$p)&&$p['armorClass']!==''?(int)$p['armorClass']:($stats['armorClass']??null); $rotation=array_key_exists('rotationDegrees',$p)?$this->snapRotation((int)$p['rotationDegrees']):$this->autoNpcRotation($s,$x,$y); $this->db->prepare('INSERT INTO npc_characters(scenario_id,name,x,y,notes,health,armor_class,rotation_degrees,initiative,visible,image_asset_id,codex_creature_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')->execute([$s['id'],trim((string)($p['name']??'NPC'))?:'NPC',$x,$y,$p['notes']??null,$health,$armorClass,$rotation,isset($p['initiative'])?(int)$p['initiative']:null,!empty($p['visible'])?1:0,$imageAssetId,$codexCreatureId]); return ['id'=>(int)$this->db->lastInsertId(),'kind'=>'NPC','x'=>$x,'y'=>$y]; }
+    private function snapRotation(int $degrees): int { $degrees=($degrees%360+360)%360; return (int)(round($degrees/45)*45)%360; }
+    private function autoNpcRotation(array $s,int $x,int $y): int
+    {
+        $players=$this->all('SELECT x,y FROM scenario_players WHERE scenario_id=? AND placed=1',[$s['id']]);
+        $best=null; $bestDist=null;
+        foreach($players as $pl){$dx=(int)$pl['x']-$x;$dy=(int)$pl['y']-$y;$dist=$dx*$dx+$dy*$dy;if($dist===0)continue;if($bestDist===null||$dist<$bestDist){$bestDist=$dist;$best=[$dx,$dy];}}
+        if(!$best) return 0;
+        [$dx,$dy]=$best; $deg=rad2deg(atan2(-$dx,$dy));
+        return $this->snapRotation((int)round($deg));
+    }
     private function codexCreatureStats(int $creatureId): array
     {
         if($creatureId<1) return [];
@@ -188,13 +199,29 @@ final class GameService
         return ['kind'=>$kind,'id'=>$id];
     }
 
+    private function cloneToken(array $s,array $p): array
+    {
+        [$x,$y]=$this->coords($s,$p); $kind=strtoupper((string)($p['kind']??'')); $id=(int)($p['id']??0);
+        if($kind==='NPC'){
+            $src=$this->one('SELECT * FROM npc_characters WHERE id=? AND scenario_id=?',[$id,$s['id']]); if(!$src)throw new RuntimeException('NPC inexistente.');
+            $this->db->prepare('INSERT INTO npc_characters(scenario_id,name,x,y,notes,image_asset_id,codex_creature_id,health,armor_class,rotation_degrees,initiative,visible,dead_hidden) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')->execute([$s['id'],$src['name'],$x,$y,$src['notes'],$src['image_asset_id'],$src['codex_creature_id'],$src['health'],$src['armor_class'],$this->autoNpcRotation($s,$x,$y),$src['initiative'],$src['visible'],$src['dead_hidden']]);
+            return ['id'=>(int)$this->db->lastInsertId(),'kind'=>'NPC','x'=>$x,'y'=>$y];
+        }
+        if($kind==='OBJECT'){
+            $src=$this->one('SELECT * FROM map_objects WHERE id=? AND scenario_id=?',[$id,$s['id']]); if(!$src)throw new RuntimeException('Objeto inexistente.'); $this->validateObjectSize($s,$x,$y,(int)$src['width_cells'],(int)$src['height_cells']);
+            $this->db->prepare('INSERT INTO map_objects(scenario_id,name,x,y,width_cells,height_cells,notes,visible,image_asset_id) VALUES (?,?,?,?,?,?,?,?,?)')->execute([$s['id'],$src['name'],$x,$y,$src['width_cells'],$src['height_cells'],$src['notes'],$src['visible'],$src['image_asset_id']]);
+            return ['id'=>(int)$this->db->lastInsertId(),'kind'=>'OBJECT','x'=>$x,'y'=>$y];
+        }
+        throw new RuntimeException('No se puede clonar este token.');
+    }
+
     private function updateToken(array $s,array $p): array
     {
         $kind=strtoupper((string)($p['kind']??'')); $id=(int)($p['id']??0);
-        if($kind==='NPC') { $fields=['name','notes','health','armor_class','initiative','visible','dead_hidden','image_asset_id']; $table='npc_characters'; }
+        if($kind==='NPC') { $fields=['name','notes','health','armor_class','rotation_degrees','initiative','visible','dead_hidden','image_asset_id']; $table='npc_characters'; }
         elseif($kind==='OBJECT') { $fields=['name','notes','visible','image_asset_id','width_cells','height_cells']; $table='map_objects';if(array_key_exists('width_cells',$p)||array_key_exists('height_cells',$p)){$current=$this->one('SELECT * FROM map_objects WHERE id=? AND scenario_id=?',[$id,$s['id']]);if(!$current)throw new RuntimeException('Objeto inexistente.');$this->validateObjectSize($s,(int)$current['x'],(int)$current['y'],(int)($p['width_cells']??$current['width_cells']),(int)($p['height_cells']??$current['height_cells']));} }
         else throw new RuntimeException('Tipo de token inválido.');
-        $sets=[];$vals=[]; foreach($fields as $f)if(array_key_exists($f,$p)){$value=$p[$f];if(in_array($f,['visible','dead_hidden'],true))$value=!empty($value)?1:0;elseif(in_array($f,['health','width_cells','height_cells'],true))$value=(int)$value;elseif(in_array($f,['initiative','armor_class'],true))$value=$value===null||$value===''?null:(int)$value;elseif($f==='image_asset_id')$value=$value===null||$value===''?null:(int)$value;else $value=(string)$value;$sets[]="$f=?";$vals[]=$value;}
+        $sets=[];$vals=[]; foreach($fields as $f)if(array_key_exists($f,$p)){$value=$p[$f];if(in_array($f,['visible','dead_hidden'],true))$value=!empty($value)?1:0;elseif(in_array($f,['health','width_cells','height_cells'],true))$value=(int)$value;elseif($f==='rotation_degrees')$value=$this->snapRotation((int)$value);elseif(in_array($f,['initiative','armor_class'],true))$value=$value===null||$value===''?null:(int)$value;elseif($f==='image_asset_id')$value=$value===null||$value===''?null:(int)$value;else $value=(string)$value;$sets[]="$f=?";$vals[]=$value;}
         if(!$sets)throw new RuntimeException('No hay cambios.'); $vals[]=$id;$vals[]=$s['id'];
         $this->db->prepare("UPDATE $table SET ".implode(',',$sets).' WHERE id=? AND scenario_id=?')->execute($vals);
         return ['kind'=>$kind,'id'=>$id];

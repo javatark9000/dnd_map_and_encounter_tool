@@ -149,14 +149,18 @@ CREATE TABLE npc_characters (
  y TINYINT UNSIGNED NOT NULL,
  notes MEDIUMTEXT NULL,
  image_asset_id BIGINT UNSIGNED NULL,
+ codex_creature_id BIGINT UNSIGNED NULL,
  health INT NOT NULL DEFAULT 1,
  armor_class INT NULL,
+ rotation_degrees SMALLINT UNSIGNED NOT NULL DEFAULT 0,
  initiative INT NULL,
  visible BOOLEAN NOT NULL DEFAULT TRUE,
  dead_hidden BOOLEAN NOT NULL DEFAULT FALSE,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  FOREIGN KEY (scenario_id) REFERENCES scenarios(id) ON DELETE CASCADE,
  FOREIGN KEY (image_asset_id) REFERENCES assets(id) ON DELETE SET NULL,
+ FOREIGN KEY (codex_creature_id) REFERENCES creatures(id) ON DELETE SET NULL,
+ INDEX(codex_creature_id),
  INDEX(scenario_id,x,y)
 ) ENGINE=InnoDB;
 

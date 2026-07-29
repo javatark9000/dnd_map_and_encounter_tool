@@ -48,6 +48,7 @@ try {
     if($path==='/api/codex/customize'&&$method==='POST'){ requireDm($user); jsonOut(createCustomCodexRecord($db,$user,$body),201); }
     if($path==='/api/codex/customize/media'&&$method==='POST'){ requireDm($user); jsonOut(uploadCustomCodexMedia($db,$user),201); }
     if(preg_match('#^/api/codex/customize/(creature|item|spell)/(\d+)$#',$path,$m)&&$method==='PATCH'){ requireDm($user); jsonOut(updateCustomCodexRecord($db,$user,$m[1],(int)$m[2],$body)); }
+    if(preg_match('#^/api/codex/customize/creature/(\d+)/deactivate$#',$path,$m)&&$method==='POST'){ requireDm($user); jsonOut(deactivateCustomCreature($db,(int)$m[1])); }
     if(preg_match('#^/api/scenarios/(\d+)/snapshot$#',$path,$m)&&$method==='GET') jsonOut($game->snapshot((int)$m[1],$user));
 
     if($path==='/api/scenarios'&&$method==='POST'){
@@ -252,6 +253,12 @@ function createCustomCodexRecord(PDO $db,array $user,array $body): array {
         return ['id'=>$id,'kind'=>'spell','customIdentifier'=>$identifier];
     }
     throw new RuntimeException('Tipo de registro inválido.');
+}
+function deactivateCustomCreature(PDO $db,int $id): array {
+    if($id<1) throw new RuntimeException('Criatura inválida.');
+    $st=$db->prepare('UPDATE creatures SET is_active=0, updated_at=CURRENT_TIMESTAMP WHERE id=? AND is_custom=1');$st->execute([$id]);
+    if($st->rowCount()<1) throw new RuntimeException('Solo puedes eliminar criaturas custom activas.');
+    return ['id'=>$id,'kind'=>'creature','deactivated'=>true];
 }
 function updateCustomCodexRecord(PDO $db,array $user,string $kind,int $id,array $body): array {
     $name=trim((string)($body['name']??'')); if($name==='')throw new RuntimeException('Escribe un nombre.');
