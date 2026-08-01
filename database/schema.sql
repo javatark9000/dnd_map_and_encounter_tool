@@ -141,6 +141,8 @@ CREATE TABLE map_objects (
  INDEX(scenario_id,x,y)
 ) ENGINE=InnoDB;
 
+-- creatures is created later by migration 005; allow this forward reference during bootstrap.
+SET FOREIGN_KEY_CHECKS=0;
 CREATE TABLE npc_characters (
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
  scenario_id BIGINT UNSIGNED NOT NULL,
@@ -163,6 +165,7 @@ CREATE TABLE npc_characters (
  INDEX(codex_creature_id),
  INDEX(scenario_id,x,y)
 ) ENGINE=InnoDB;
+SET FOREIGN_KEY_CHECKS=1;
 
 CREATE TABLE scenario_players (
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

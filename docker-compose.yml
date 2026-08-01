@@ -85,6 +85,9 @@ services:
       - "8080:8080"
     volumes:
       - uploads:/app/storage/uploads
+      - ./storage/media:/app/storage/media:ro
+      - ./database/migrations:/app/database/migrations:ro
+      - ./database/private:/app/database/private:ro
     depends_on:
       mariadb:
         condition: service_healthy
@@ -107,6 +110,9 @@ services:
       - "8081:8081"
     volumes:
       - uploads:/app/storage/uploads
+      - ./storage/media:/app/storage/media:ro
+      - ./database/migrations:/app/database/migrations:ro
+      - ./database/private:/app/database/private:ro
     depends_on:
       mariadb:
         condition: service_healthy
