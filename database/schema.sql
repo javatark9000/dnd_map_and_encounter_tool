@@ -179,7 +179,7 @@ CREATE TABLE scenario_players (
  last_path JSON NULL,
  placed BOOLEAN NOT NULL DEFAULT TRUE,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
- UNIQUE(scenario_id,user_id),
+ UNIQUE KEY uq_scenario_character(scenario_id,character_id),
  INDEX(user_id,placed),
  FOREIGN KEY (scenario_id) REFERENCES scenarios(id) ON DELETE CASCADE,
  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -230,6 +230,7 @@ CREATE TABLE movement_requests (
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
  scenario_id BIGINT UNSIGNED NOT NULL,
  user_id BIGINT UNSIGNED NOT NULL,
+ scenario_player_id BIGINT UNSIGNED NULL,
  path JSON NOT NULL,
  status ENUM('PENDING','APPROVED','REJECTED','APPLIED') NOT NULL,
  reason VARCHAR(255) NULL,
@@ -238,7 +239,9 @@ CREATE TABLE movement_requests (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
  FOREIGN KEY (scenario_id) REFERENCES scenarios(id) ON DELETE CASCADE,
  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
- FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+ FOREIGN KEY (scenario_player_id) REFERENCES scenario_players(id) ON DELETE SET NULL,
+ FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
+ INDEX(scenario_player_id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE scenario_events (

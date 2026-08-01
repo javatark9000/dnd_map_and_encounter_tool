@@ -11,7 +11,7 @@ Aplicación web responsive para administrar mapas, jugadores y encuentros de jue
 - Fondo de mapa, celdas bloqueadas, notas de celda, objetos y NPC visibles/ocultos.
 - Canvas con pan, zoom, rueda, Pointer Events y pinch-to-zoom.
 - Agrupación de tokens y pila con contador cuando hay cuatro o más.
-- Colocación en un único escenario, caminos diagonales celda a celda y aprobación del DM al cruzar bloqueos/actores vivos.
+- Colocación simultánea y control independiente de varios personajes por jugador, con caminos diagonales celda a celda y aprobación del DM al cruzar bloqueos/actores vivos.
 - Teleport del DM, vida, iniciativa, preparación/inicio/fin de combate y cambio de turno.
 - Desempate manual soportado por el backend y turnos retrasados vinculados.
 - Ocultamiento de NPC con vida 0 para jugadores y X roja para el DM.
