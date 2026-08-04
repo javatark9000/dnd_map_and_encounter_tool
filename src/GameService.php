@@ -14,7 +14,7 @@ final class GameService
     {
         $campaigns=$this->all('SELECT c.* FROM campaigns c JOIN campaign_members m ON m.campaign_id=c.id WHERE m.user_id=? ORDER BY c.id',[$user['id']]);
         $characters=$user['role']==='PLAYER' ? $this->all('SELECT p.*,a.path avatar_path FROM player_characters p LEFT JOIN assets a ON a.id=p.avatar_asset_id WHERE p.owner_id=?',[$user['id']]) : [];
-        $scenarioSql='SELECT s.*,a.path background_path FROM scenarios s LEFT JOIN assets a ON a.id=s.background_asset_id WHERE s.campaign_id IN (SELECT campaign_id FROM campaign_members WHERE user_id=?)';
+        $scenarioSql='SELECT s.*,a.path background_path FROM scenarios s LEFT JOIN assets a ON a.id=s.background_asset_id WHERE s.campaign_id IN (SELECT campaign_id FROM campaign_members WHERE user_id=?) AND s.is_deleted=0';
         if($user['role']!=='DM') $scenarioSql.=' AND s.active=1';
         $scenarioSql.=' ORDER BY s.active DESC,s.name';
         $scenarios=$this->all($scenarioSql,[$user['id']]);
@@ -25,15 +25,15 @@ final class GameService
     public function snapshot(int $scenarioId, array $user): array
     {
         $s=$this->one('SELECT s.*,a.path background_path FROM scenarios s LEFT JOIN assets a ON a.id=s.background_asset_id WHERE s.id=?',[$scenarioId]);
-        if(!$s) throw new RuntimeException('Escenario inexistente.');
+        if(!$s || !empty($s['is_deleted'])) throw new RuntimeException('Escenario inexistente.');
         $this->assertMember((int)$s['campaign_id'],(int)$user['id']);
         if($user['role']!=='DM' && !(bool)$s['active']) throw new RuntimeException('El escenario no está activo.');
         $blocked=$this->all('SELECT x,y FROM blocked_cells WHERE scenario_id=?',[$scenarioId]);
         $objects=$this->all('SELECT o.*,a.path image_path FROM map_objects o LEFT JOIN assets a ON a.id=o.image_asset_id WHERE o.scenario_id=?'.($user['role']==='DM'?'':' AND o.visible=1'),[$scenarioId]);
-        $npcSql='SELECT n.*,a.path image_path FROM npc_characters n LEFT JOIN assets a ON a.id=n.image_asset_id WHERE n.scenario_id=?';
+        $npcSql='SELECT n.*,COALESCE(n.max_health,n.health) max_health,a.path image_path FROM npc_characters n LEFT JOIN assets a ON a.id=n.image_asset_id WHERE n.scenario_id=?';
         if($user['role']!=='DM') $npcSql.=' AND n.visible=1 AND NOT(n.health<=0 OR n.dead_hidden=1)';
         $npcs=$this->all($npcSql,[$scenarioId]);
-        $players=$this->all('SELECT sp.*,u.name user_name,pc.name,pc.avatar_asset_id image_asset_id,a.path image_path,dpn.notes dm_notes FROM scenario_players sp JOIN users u ON u.id=sp.user_id JOIN player_characters pc ON pc.id=sp.character_id LEFT JOIN assets a ON a.id=pc.avatar_asset_id LEFT JOIN dm_player_notes dpn ON dpn.player_id=sp.user_id AND dpn.campaign_id=pc.campaign_id WHERE sp.scenario_id=?'.($user['role']==='DM'?'':' AND sp.placed=1'),[$scenarioId]);
+        $players=$this->all('SELECT sp.*,u.name user_name,pc.name,pc.max_health,pc.avatar_asset_id image_asset_id,a.path image_path,dpn.notes dm_notes FROM scenario_players sp JOIN users u ON u.id=sp.user_id JOIN player_characters pc ON pc.id=sp.character_id LEFT JOIN assets a ON a.id=pc.avatar_asset_id LEFT JOIN dm_player_notes dpn ON dpn.player_id=sp.user_id AND dpn.campaign_id=pc.campaign_id WHERE sp.scenario_id=?'.($user['role']==='DM'?'':' AND sp.placed=1'),[$scenarioId]);
         $encounter=$this->one('SELECT * FROM encounters WHERE scenario_id=?',[$scenarioId]);
         $participants=[];
         if($encounter) $participants=$this->all('SELECT * FROM encounter_participants WHERE encounter_id=? ORDER BY initiative DESC,tie_order,id',[$encounter['id']]);
@@ -45,8 +45,8 @@ final class GameService
         $notes=$user['role']==='DM'?$this->all('SELECT * FROM cell_notes WHERE scenario_id=?',[$scenarioId]):[];
         if($user['role']!=='DM') {
             $objects=array_map(fn($o)=>['id'=>$o['id'],'x'=>$o['x'],'y'=>$o['y'],'width_cells'=>$o['width_cells'],'height_cells'=>$o['height_cells'],'image_asset_id'=>$o['image_asset_id']],$objects);
-            $npcs=array_map(fn($n)=>['id'=>$n['id'],'x'=>$n['x'],'y'=>$n['y'],'image_asset_id'=>$n['image_asset_id']],$npcs);
-            foreach($players as &$pl) unset($pl['dm_notes']);
+            $npcs=array_map(fn($n)=>['id'=>$n['id'],'x'=>$n['x'],'y'=>$n['y'],'image_asset_id'=>$n['image_asset_id'],'rotation_degrees'=>$n['rotation_degrees']],$npcs);
+            foreach($players as &$pl){ unset($pl['dm_notes']); if($user['role']!=='PLAYER'||(int)$pl['user_id']!==(int)$user['id']) unset($pl['health'],$pl['max_health']); }
         }
         return ['scenario'=>$s,'blocked'=>$blocked,'objects'=>$objects,'npcs'=>$npcs,'players'=>$players,'encounter'=>$encounter,'participants'=>$participants,'pendingMovements'=>$pending,'cellNotes'=>$notes];
     }
@@ -65,7 +65,7 @@ final class GameService
     public function guestView(array $user): ?array
     {
         if($user['role']!=='GUEST') return null;
-        $view=$this->one('SELECT v.campaign_id,v.scenario_id,v.center_x,v.center_y,v.zoom FROM dm_scenario_views v JOIN scenarios s ON s.id=v.scenario_id JOIN campaign_members m ON m.campaign_id=v.campaign_id WHERE m.user_id=? AND s.active=1 ORDER BY v.viewed_at DESC,v.scenario_id DESC LIMIT 1',[$user['id']]);
+        $view=$this->one('SELECT v.campaign_id,v.scenario_id,v.center_x,v.center_y,v.zoom FROM dm_scenario_views v JOIN scenarios s ON s.id=v.scenario_id JOIN campaign_members m ON m.campaign_id=v.campaign_id WHERE m.user_id=? AND s.active=1 AND s.is_deleted=0 ORDER BY v.viewed_at DESC,v.scenario_id DESC LIMIT 1',[$user['id']]);
         return $view?['scenarioId'=>(int)$view['scenario_id'],'campaignId'=>(int)$view['campaign_id'],'camera'=>['centerX'=>(float)$view['center_x'],'centerY'=>(float)$view['center_y'],'zoom'=>(float)$view['zoom']]]:null;
     }
 
@@ -80,11 +80,12 @@ final class GameService
             $s=$this->one('SELECT * FROM scenarios WHERE id=? FOR UPDATE',[$scenarioId]);
             if(!$s) throw new RuntimeException('Escenario inexistente.');
             $this->assertMember((int)$s['campaign_id'],(int)$user['id']);
-            $dmOnly=['scenario.activate','scenario.deactivate','map.cells.paint','object.create','objects.bulk_update','tokens.bulk_update','tokens.delete','npc.create','token.update','token.delete','token.clone','token.move_dm','movement.approve','movement.reject','encounter.prepare','encounter.start','encounter.stop','initiative.set','initiative.reorder_tie','turn.next','turn.delay_order','health.set','cell.note','player.note'];
+            $dmOnly=['scenario.activate','scenario.deactivate','scenario.hide','map.cells.paint','object.create','objects.bulk_update','tokens.bulk_update','tokens.delete','npc.create','token.update','token.delete','token.clone','token.move_dm','movement.approve','movement.reject','encounter.prepare','encounter.start','encounter.include','encounter.restart_round','encounter.stop','initiative.set','initiative.reorder_tie','turn.next','turn.rollback','turn.delay_order','health.set','cell.note','player.note'];
             if(in_array($type,$dmOnly,true) && $user['role']!=='DM') throw new RuntimeException('Acción exclusiva del DM.');
             $data=match($type){
                 'scenario.activate'=>$this->activate($scenarioId,true),
                 'scenario.deactivate'=>$this->activate($scenarioId,false),
+                'scenario.hide'=>$this->hideScenario($scenarioId),
                 'map.cells.paint'=>$this->paint($s,$p),
                 'cell.note'=>$this->cellNote($s,$p),
                 'player.note'=>$this->playerNote($s,$p),
@@ -102,11 +103,14 @@ final class GameService
                 'movement.approve'=>$this->reviewMovement($s,$user,$p,true),
                 'movement.reject'=>$this->reviewMovement($s,$user,$p,false),
                 'encounter.prepare'=>$this->encounterPrepare($scenarioId),
-                'encounter.start'=>$this->encounterStart($scenarioId),
+                'encounter.start'=>$this->encounterStart($scenarioId,$p),
+                'encounter.include'=>$this->encounterInclude($scenarioId,$p),
+                'encounter.restart_round'=>$this->encounterRestartRound($scenarioId),
                 'encounter.stop'=>$this->encounterStop($scenarioId),
                 'initiative.set'=>$this->initiativeSet($scenarioId,$p),
                 'initiative.reorder_tie'=>$this->initiativeReorder($scenarioId,$p),
                 'turn.next'=>$this->turnNext($scenarioId),
+                'turn.rollback'=>$this->turnRollback($scenarioId),
                 'turn.delay'=>$this->turnDelay($scenarioId,$user,$p),
                 'turn.delay_order'=>$this->turnDelayOrder($scenarioId,$p),
                 'health.set'=>$this->healthSet($scenarioId,$p),
@@ -122,7 +126,8 @@ final class GameService
         return $result;
     }
 
-    private function activate(int $id,bool $active): array { $this->db->prepare('UPDATE scenarios SET active=? WHERE id=?')->execute([$active?1:0,$id]); if(!$active)$this->db->prepare('UPDATE scenario_players SET placed=0 WHERE scenario_id=?')->execute([$id]); return ['active'=>$active]; }
+    private function activate(int $id,bool $active): array { $this->db->prepare('UPDATE scenarios SET active=? WHERE id=? AND is_deleted=0')->execute([$active?1:0,$id]); if(!$active)$this->db->prepare('UPDATE scenario_players SET placed=0 WHERE scenario_id=?')->execute([$id]); return ['active'=>$active]; }
+    private function hideScenario(int $id): array { $this->db->prepare('UPDATE scenarios SET is_deleted=1,active=0 WHERE id=?')->execute([$id]); $this->db->prepare('UPDATE scenario_players SET placed=0 WHERE scenario_id=?')->execute([$id]); $this->db->prepare('DELETE FROM dm_scenario_views WHERE scenario_id=?')->execute([$id]); return ['hidden'=>true]; }
 
     private function paint(array $s,array $p): array
     {
@@ -140,7 +145,7 @@ final class GameService
     private function createObject(array $s,array $p): array { [$x,$y]=$this->coords($s,$p);$width=(int)($p['widthCells']??1);$height=(int)($p['heightCells']??1);$this->validateObjectSize($s,$x,$y,$width,$height);$this->db->prepare('INSERT INTO map_objects(scenario_id,name,x,y,width_cells,height_cells,notes,visible,image_asset_id) VALUES (?,?,?,?,?,?,?,?,?)')->execute([$s['id'],trim((string)($p['name']??'Objeto'))?:'Objeto',$x,$y,$width,$height,$p['notes']??null,!empty($p['visible'])?1:0,$p['imageAssetId']??null]);return ['id'=>(int)$this->db->lastInsertId(),'kind'=>'OBJECT','x'=>$x,'y'=>$y,'widthCells'=>$width,'heightCells'=>$height]; }
     private function bulkUpdateObjects(array $s,array $p): array { $ids=array_values(array_unique(array_filter(array_map('intval',(array)($p['objectIds']??[])),fn($id)=>$id>0)));if(!$ids||count($ids)>200)throw new RuntimeException('Selecciona entre 1 y 200 objetos.');$sets=[];$values=[];if(array_key_exists('visible',$p)){$sets[]='visible=?';$values[]=!empty($p['visible'])?1:0;}if(array_key_exists('image_asset_id',$p)){$sets[]='image_asset_id=?';$values[]=(int)$p['image_asset_id'];}if(!$sets)throw new RuntimeException('No hay cambios para aplicar.');$placeholders=implode(',',array_fill(0,count($ids),'?'));$values[]=$s['id'];array_push($values,...$ids);$this->db->prepare('UPDATE map_objects SET '.implode(',',$sets)." WHERE scenario_id=? AND id IN ($placeholders)")->execute($values);return ['objectIds'=>$ids,'updated'=>$this->db->query('SELECT ROW_COUNT()')->fetchColumn()]; }
     private function bulkUpdateTokens(array $s,array $p): array { $items=array_slice((array)($p['items']??[]),0,201);if(!$items||count($items)>200)throw new RuntimeException('Selecciona entre 1 y 200 elementos.');$objects=[];$npcs=[];foreach($items as $item){$kind=strtoupper((string)($item['kind']??''));$id=(int)($item['id']??0);if($id<1)continue;if($kind==='OBJECT')$objects[]=$id;elseif($kind==='NPC')$npcs[]=$id;else throw new RuntimeException('Tipo de elemento no permitido.');}$objects=array_values(array_unique($objects));$npcs=array_values(array_unique($npcs));if(!$objects&&!$npcs)throw new RuntimeException('Selección inválida.');$sets=[];$values=[];if(array_key_exists('visible',$p)){$sets[]='visible=?';$values[]=!empty($p['visible'])?1:0;}if(array_key_exists('image_asset_id',$p)){$sets[]='image_asset_id=?';$values[]=(int)$p['image_asset_id'];}if(!$sets)throw new RuntimeException('No hay cambios para aplicar.');$updated=0;foreach([['map_objects',$objects],['npc_characters',$npcs]] as [$table,$ids]){if(!$ids)continue;$placeholders=implode(',',array_fill(0,count($ids),'?'));$params=$values;$params[]=$s['id'];array_push($params,...$ids);$q=$this->db->prepare("UPDATE $table SET ".implode(',',$sets)." WHERE scenario_id=? AND id IN ($placeholders)");$q->execute($params);$updated+=$q->rowCount();}return ['items'=>$items,'updated'=>$updated]; }
-    private function createNpc(array $s,array $p,array $user): array { [$x,$y]=$this->coords($s,$p); $imageAssetId=$p['imageAssetId']??null; $stats=[]; $codexCreatureId=!empty($p['codexCreatureId'])?(int)$p['codexCreatureId']:null; if($codexCreatureId){ if(!$imageAssetId) $imageAssetId=$this->codexCreatureAssetId($user,$codexCreatureId); $stats=$this->codexCreatureStats($codexCreatureId);} $health=array_key_exists('health',$p)?(int)$p['health']:(int)($stats['health']??1); $armorClass=array_key_exists('armorClass',$p)&&$p['armorClass']!==''?(int)$p['armorClass']:($stats['armorClass']??null); $rotation=array_key_exists('rotationDegrees',$p)?$this->snapRotation((int)$p['rotationDegrees']):$this->autoNpcRotation($s,$x,$y); $this->db->prepare('INSERT INTO npc_characters(scenario_id,name,x,y,notes,health,armor_class,rotation_degrees,initiative,visible,image_asset_id,codex_creature_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')->execute([$s['id'],trim((string)($p['name']??'NPC'))?:'NPC',$x,$y,$p['notes']??null,$health,$armorClass,$rotation,isset($p['initiative'])?(int)$p['initiative']:null,!empty($p['visible'])?1:0,$imageAssetId,$codexCreatureId]); return ['id'=>(int)$this->db->lastInsertId(),'kind'=>'NPC','x'=>$x,'y'=>$y]; }
+    private function createNpc(array $s,array $p,array $user): array { [$x,$y]=$this->coords($s,$p); $imageAssetId=$p['imageAssetId']??null; $stats=[]; $codexCreatureId=!empty($p['codexCreatureId'])?(int)$p['codexCreatureId']:null; if($codexCreatureId){ if(!$imageAssetId) $imageAssetId=$this->codexCreatureAssetId($user,$codexCreatureId); $stats=$this->codexCreatureStats($codexCreatureId);} $health=array_key_exists('health',$p)?(int)$p['health']:(int)($stats['health']??1); $armorClass=array_key_exists('armorClass',$p)&&$p['armorClass']!==''?(int)$p['armorClass']:($stats['armorClass']??null); $rotation=array_key_exists('rotationDegrees',$p)?$this->snapRotation((int)$p['rotationDegrees']):$this->autoNpcRotation($s,$x,$y); $this->db->prepare('INSERT INTO npc_characters(scenario_id,name,x,y,notes,health,max_health,armor_class,rotation_degrees,initiative,visible,image_asset_id,codex_creature_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')->execute([$s['id'],trim((string)($p['name']??'NPC'))?:'NPC',$x,$y,$p['notes']??null,$health,$health,$armorClass,$rotation,isset($p['initiative'])?(int)$p['initiative']:null,!empty($p['visible'])?1:0,$imageAssetId,$codexCreatureId]); return ['id'=>(int)$this->db->lastInsertId(),'kind'=>'NPC','x'=>$x,'y'=>$y]; }
     private function snapRotation(int $degrees): int { $degrees=($degrees%360+360)%360; return (int)(round($degrees/45)*45)%360; }
     private function autoNpcRotation(array $s,int $x,int $y): int
     {
@@ -204,7 +209,7 @@ final class GameService
         [$x,$y]=$this->coords($s,$p); $kind=strtoupper((string)($p['kind']??'')); $id=(int)($p['id']??0);
         if($kind==='NPC'){
             $src=$this->one('SELECT * FROM npc_characters WHERE id=? AND scenario_id=?',[$id,$s['id']]); if(!$src)throw new RuntimeException('NPC inexistente.');
-            $this->db->prepare('INSERT INTO npc_characters(scenario_id,name,x,y,notes,image_asset_id,codex_creature_id,health,armor_class,rotation_degrees,initiative,visible,dead_hidden) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')->execute([$s['id'],$src['name'],$x,$y,$src['notes'],$src['image_asset_id'],$src['codex_creature_id'],$src['health'],$src['armor_class'],$this->autoNpcRotation($s,$x,$y),$src['initiative'],$src['visible'],$src['dead_hidden']]);
+            $this->db->prepare('INSERT INTO npc_characters(scenario_id,name,x,y,notes,image_asset_id,codex_creature_id,health,max_health,armor_class,rotation_degrees,initiative,visible,dead_hidden) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')->execute([$s['id'],$src['name'],$x,$y,$src['notes'],$src['image_asset_id'],$src['codex_creature_id'],$src['health'],$src['max_health']??$src['health'],$src['armor_class'],$this->autoNpcRotation($s,$x,$y),$src['initiative'],$src['visible'],$src['dead_hidden']]);
             return ['id'=>(int)$this->db->lastInsertId(),'kind'=>'NPC','x'=>$x,'y'=>$y];
         }
         if($kind==='OBJECT'){
@@ -227,17 +232,19 @@ final class GameService
         return ['kind'=>$kind,'id'=>$id];
     }
 
-    private function moveDm(array $s,array $p): array { [$x,$y]=$this->coords($s,$p);$kind=strtoupper((string)$p['kind']);$id=(int)$p['id'];$table=match($kind){'NPC'=>'npc_characters','OBJECT'=>'map_objects','PLAYER'=>'scenario_players',default=>throw new RuntimeException('Token inválido.')};if($kind==='OBJECT'){$object=$this->one('SELECT width_cells,height_cells FROM map_objects WHERE id=? AND scenario_id=?',[$id,$s['id']]);if(!$object)throw new RuntimeException('Objeto inexistente.');$this->validateObjectSize($s,$x,$y,(int)$object['width_cells'],(int)$object['height_cells']);}$this->db->prepare("UPDATE $table SET x=?,y=? WHERE id=? AND scenario_id=?")->execute([$x,$y,$id,$s['id']]);return compact('kind','id','x','y'); }
+    private function moveDm(array $s,array $p): array { [$x,$y]=$this->coords($s,$p);$kind=strtoupper((string)$p['kind']);$id=(int)$p['id'];$table=match($kind){'NPC'=>'npc_characters','OBJECT'=>'map_objects','PLAYER'=>'scenario_players',default=>throw new RuntimeException('Token inválido.')};if($kind==='OBJECT'){$object=$this->one('SELECT width_cells,height_cells FROM map_objects WHERE id=? AND scenario_id=?',[$id,$s['id']]);if(!$object)throw new RuntimeException('Objeto inexistente.');$this->validateObjectSize($s,$x,$y,(int)$object['width_cells'],(int)$object['height_cells']);}if($kind==='PLAYER')$this->db->prepare("UPDATE $table SET x=?,y=?,last_path=NULL WHERE id=? AND scenario_id=?")->execute([$x,$y,$id,$s['id']]);else $this->db->prepare("UPDATE $table SET x=?,y=? WHERE id=? AND scenario_id=?")->execute([$x,$y,$id,$s['id']]);return compact('kind','id','x','y'); }
 
     private function placePlayer(array $s,array $u,array $p): array
     {
         if($u['role']!=='PLAYER')throw new RuntimeException('Solo los jugadores se colocan.'); if(!$s['active'])throw new RuntimeException('El escenario no está activo.'); [$x,$y]=$this->coords($s,$p);
         $cid=(int)($p['characterId']??0); $c=$this->one('SELECT * FROM player_characters WHERE id=? AND owner_id=? AND campaign_id=?',[$cid,$u['id'],$s['campaign_id']]); if(!$c)throw new RuntimeException('Personaje inválido.');
         $this->db->prepare('UPDATE scenario_players SET placed=0 WHERE character_id=?')->execute([$cid]);
-        $this->db->prepare('INSERT INTO scenario_players(scenario_id,user_id,character_id,x,y,health) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id),user_id=VALUES(user_id),x=VALUES(x),y=VALUES(y),health=VALUES(health),last_path=NULL,placed=1')->execute([$s['id'],$u['id'],$cid,$x,$y,$c['max_health']]);
+        $color=$this->playerTokenColor($p['tokenColor']??null);
+        $this->db->prepare('INSERT INTO scenario_players(scenario_id,user_id,character_id,x,y,health,token_color) VALUES (?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id),user_id=VALUES(user_id),x=VALUES(x),y=VALUES(y),health=VALUES(health),token_color=VALUES(token_color),last_path=NULL,placed=1')->execute([$s['id'],$u['id'],$cid,$x,$y,$c['max_health'],$color]);
         return ['scenarioPlayerId'=>(int)$this->db->lastInsertId(),'userId'=>$u['id'],'characterId'=>$cid,'x'=>$x,'y'=>$y];
     }
 
+    private function playerTokenColor($color): ?string { $color=(string)($color??''); $allowed=['transparent','#4c8cc7','#c74c4c','#5d9c63','#d7aa52','#8e5ad7','#d75aa5','#52b8b8','#f4ead7','#30271e']; return in_array($color,$allowed,true)?$color:'#4c8cc7'; }
     private function submitMovement(array $s,array $u,array $p): array
     {
         if($u['role']!=='PLAYER')throw new RuntimeException('Movimiento de jugador inválido.');
@@ -266,13 +273,25 @@ final class GameService
     }
 
     private function encounterPrepare(int $sid): array { $this->db->prepare("INSERT INTO encounters(scenario_id,state) VALUES (?,'PREPARING') ON DUPLICATE KEY UPDATE state='PREPARING',round_no=0,current_participant_id=NULL,turn_sequence=0")->execute([$sid]); return ['state'=>'PREPARING']; }
-    private function encounterStart(int $sid): array
+    private function encounterStart(int $sid,array $p=[]): array
     {
         $e=$this->one('SELECT * FROM encounters WHERE scenario_id=? FOR UPDATE',[$sid]);if(!$e||!in_array($e['state'],['PREPARING','PAUSED']))throw new RuntimeException('Primero prepara el encounter.');
-        $this->syncParticipants((int)$e['id'],$sid);$first=$this->one("SELECT * FROM encounter_participants WHERE encounter_id=? AND initiative IS NOT NULL AND state='ACTIVE' ORDER BY initiative DESC,tie_order,id LIMIT 1",[$e['id']]);if(!$first)throw new RuntimeException('No hay participantes con iniciativa.');
+        if(array_key_exists('participants',$p))$this->syncSelectedParticipants((int)$e['id'],$sid,(array)$p['participants']);else $this->syncParticipants((int)$e['id'],$sid);
+        $first=$this->one("SELECT * FROM encounter_participants WHERE encounter_id=? AND initiative IS NOT NULL AND state='ACTIVE' ORDER BY initiative DESC,tie_order,id LIMIT 1",[$e['id']]);if(!$first)throw new RuntimeException('No hay participantes con iniciativa.');
         $this->db->prepare("UPDATE encounters SET state='RUNNING',round_no=1,current_participant_id=?,turn_sequence=1 WHERE id=?")->execute([$first['id'],$e['id']]);return ['state'=>'RUNNING','round'=>1,'currentParticipantId'=>(int)$first['id']];
     }
-    private function encounterStop(int $sid): array { $this->db->prepare("UPDATE encounters SET state='OFF',current_participant_id=NULL WHERE scenario_id=?")->execute([$sid]);return ['state'=>'OFF']; }
+    private function encounterInclude(int $sid,array $p): array
+    {
+        $e=$this->one("SELECT * FROM encounters WHERE scenario_id=? AND state<>'OFF'",[$sid]);if(!$e)throw new RuntimeException('No hay encounter activo.');
+        $kind=strtoupper((string)($p['kind']??''));$id=(int)($p['id']??0);$this->upsertParticipant((int)$e['id'],$sid,$kind,$id);return compact('kind','id');
+    }
+    private function encounterRestartRound(int $sid): array
+    {
+        $e=$this->one("SELECT * FROM encounters WHERE scenario_id=? AND state='RUNNING' FOR UPDATE",[$sid]);if(!$e)throw new RuntimeException('No hay combate activo.');
+        $first=$this->one("SELECT * FROM encounter_participants WHERE encounter_id=? AND initiative IS NOT NULL AND state='ACTIVE' ORDER BY initiative DESC,tie_order,id LIMIT 1",[$e['id']]);if(!$first)throw new RuntimeException('No hay participantes activos.');
+        $this->saveTurnHistory($e);$seq=(int)$e['turn_sequence']+1;$this->db->prepare('UPDATE encounters SET current_participant_id=?,turn_sequence=? WHERE id=?')->execute([$first['id'],$seq,$e['id']]);return ['state'=>'RUNNING','round'=>(int)$e['round_no'],'currentParticipantId'=>(int)$first['id'],'turnSequence'=>$seq];
+    }
+    private function encounterStop(int $sid): array { $e=$this->one('SELECT id FROM encounters WHERE scenario_id=?',[$sid]); if($e)$this->db->prepare('DELETE FROM encounter_turn_history WHERE encounter_id=?')->execute([$e['id']]); $this->db->prepare("UPDATE encounters SET state='OFF',current_participant_id=NULL WHERE scenario_id=?")->execute([$sid]);return ['state'=>'OFF']; }
 
     private function initiativeSet(int $sid,array $p): array
     {
@@ -303,6 +322,7 @@ final class GameService
     private function turnNext(int $sid): array
     {
         $e=$this->one("SELECT * FROM encounters WHERE scenario_id=? AND state='RUNNING' FOR UPDATE",[$sid]);if(!$e)throw new RuntimeException('No hay combate activo.');
+        $this->saveTurnHistory($e);
         $currentId=(int)$e['current_participant_id'];$chain=$this->one('SELECT target_participant_id FROM turn_delays WHERE encounter_id=? AND waiting_participant_id=? AND round_no=? AND triggered=1',[$e['id'],$currentId,$e['round_no']]);$target=$chain?(int)$chain['target_participant_id']:$currentId;
         $delay=$this->one('SELECT * FROM turn_delays WHERE encounter_id=? AND target_participant_id=? AND round_no=? AND triggered=0 ORDER BY sort_order,id LIMIT 1',[$e['id'],$target,$e['round_no']]);
         if($delay){$this->db->prepare('UPDATE turn_delays SET triggered=1 WHERE id=?')->execute([$delay['id']]);$this->db->prepare("UPDATE encounter_participants SET state='ACTIVE' WHERE id=?")->execute([$delay['waiting_participant_id']]);$seq=(int)$e['turn_sequence']+1;$this->db->prepare('UPDATE encounters SET current_participant_id=?,turn_sequence=? WHERE id=?')->execute([$delay['waiting_participant_id'],$seq,$e['id']]);return ['state'=>'RUNNING','round'=>(int)$e['round_no'],'currentParticipantId'=>(int)$delay['waiting_participant_id'],'turnSequence'=>$seq];}
@@ -314,6 +334,16 @@ final class GameService
         $all=$this->all("SELECT * FROM encounter_participants WHERE encounter_id=? AND initiative IS NOT NULL ORDER BY initiative DESC,tie_order,id",[$e['id']]);$active=array_values(array_filter($all,fn($x)=>$x['state']==='ACTIVE'));if(!$active)throw new RuntimeException('No hay participantes activos.');$pos=-1;foreach($all as $i=>$a)if((int)$a['id']===$afterId)$pos=$i;$pick=null;for($n=1;$n<=count($all);$n++){$candidate=$all[($pos+$n)%count($all)];if($candidate['state']==='ACTIVE'){$pick=$candidate;break;}}$round=(int)$e['round_no'];$pickPos=array_search($pick,$all,true);if($pickPos!==false&&$pickPos<=$pos)$round++;$seq=(int)$e['turn_sequence']+1;$this->db->prepare('UPDATE encounters SET current_participant_id=?,round_no=?,turn_sequence=? WHERE id=?')->execute([$pick['id'],$round,$seq,$e['id']]);return ['state'=>'RUNNING','round'=>$round,'currentParticipantId'=>(int)$pick['id'],'turnSequence'=>$seq];
     }
 
+    private function turnRollback(int $sid): array
+    {
+        $e=$this->one("SELECT * FROM encounters WHERE scenario_id=? AND state='RUNNING' FOR UPDATE",[$sid]);if(!$e)throw new RuntimeException('No hay combate activo.');
+        $h=$this->one('SELECT * FROM encounter_turn_history WHERE encounter_id=? ORDER BY id DESC LIMIT 1',[$e['id']]);if(!$h)throw new RuntimeException('No hay turnos para devolver.');
+        $this->db->prepare('UPDATE encounters SET current_participant_id=?,round_no=?,turn_sequence=? WHERE id=?')->execute([$h['previous_participant_id'],$h['previous_round_no'],$h['previous_turn_sequence'],$e['id']]);
+        $this->db->prepare('DELETE FROM encounter_turn_history WHERE id=?')->execute([$h['id']]);
+        return ['state'=>'RUNNING','round'=>(int)$h['previous_round_no'],'currentParticipantId'=>(int)$h['previous_participant_id'],'turnSequence'=>(int)$h['previous_turn_sequence']];
+    }
+    private function saveTurnHistory(array $e): void { $this->db->prepare('INSERT INTO encounter_turn_history(encounter_id,previous_participant_id,previous_round_no,previous_turn_sequence) VALUES (?,?,?,?)')->execute([$e['id'],$e['current_participant_id'],$e['round_no'],$e['turn_sequence']]); }
+
     private function healthSet(int $sid,array $p): array
     {
         $kind=strtoupper((string)($p['kind']??''));$id=(int)($p['id']??0);$health=(int)($p['health']??0);if($kind==='NPC'){$this->db->prepare('UPDATE npc_characters SET health=? WHERE id=? AND scenario_id=?')->execute([$health,$id,$sid]);if($health<=0)$this->db->prepare("UPDATE encounter_participants ep JOIN encounters e ON e.id=ep.encounter_id SET ep.state='DEAD' WHERE e.scenario_id=? AND ep.actor_type='NPC' AND ep.actor_id=?")->execute([$sid,$id]);}elseif($kind==='PLAYER')$this->db->prepare('UPDATE scenario_players SET health=? WHERE id=? AND scenario_id=?')->execute([$health,$id,$sid]);else throw new RuntimeException('Participante inválido.');return compact('kind','id','health');
@@ -322,7 +352,19 @@ final class GameService
     private function syncParticipants(int $eid,int $sid): void
     {
         $this->db->prepare("INSERT INTO encounter_participants(encounter_id,actor_type,actor_id,initiative) SELECT ?,'PLAYER',id,initiative FROM scenario_players WHERE scenario_id=? AND placed=1 AND initiative IS NOT NULL ON DUPLICATE KEY UPDATE initiative=VALUES(initiative),state=IF(state='REMOVED',state,'ACTIVE')")->execute([$eid,$sid]);
-        $this->db->prepare("INSERT INTO encounter_participants(encounter_id,actor_type,actor_id,initiative,state) SELECT ?,'NPC',id,initiative,IF(health<=0,'DEAD','ACTIVE') FROM npc_characters WHERE scenario_id=? AND initiative IS NOT NULL ON DUPLICATE KEY UPDATE initiative=VALUES(initiative),state=VALUES(state)")->execute([$eid,$sid]);
+        $this->db->prepare("INSERT INTO encounter_participants(encounter_id,actor_type,actor_id,initiative,state) SELECT ?,'NPC',id,initiative,IF(health<=0,'DEAD','ACTIVE') FROM npc_characters WHERE scenario_id=? AND visible=1 AND initiative IS NOT NULL ON DUPLICATE KEY UPDATE initiative=VALUES(initiative),state=VALUES(state)")->execute([$eid,$sid]);
+    }
+    private function syncSelectedParticipants(int $eid,int $sid,array $items): void
+    {
+        $this->db->prepare("UPDATE encounter_participants SET state='REMOVED' WHERE encounter_id=?")->execute([$eid]);
+        foreach(array_slice($items,0,200) as $item){$kind=strtoupper((string)($item['kind']??''));$id=(int)($item['id']??0);if($id>0)$this->upsertParticipant($eid,$sid,$kind,$id);}
+    }
+    private function upsertParticipant(int $eid,int $sid,string $kind,int $id): void
+    {
+        if($kind==='PLAYER'){$row=$this->one('SELECT initiative FROM scenario_players WHERE id=? AND scenario_id=? AND placed=1',[$id,$sid]);if(!$row)throw new RuntimeException('Jugador no válido para combate.');$state='ACTIVE';}
+        elseif($kind==='NPC'){$row=$this->one('SELECT initiative,health FROM npc_characters WHERE id=? AND scenario_id=? AND visible=1',[$id,$sid]);if(!$row)throw new RuntimeException('NPC no válido para combate.');$state=((int)$row['health']<=0)?'DEAD':'ACTIVE';}
+        else throw new RuntimeException('Tipo de participante inválido.');
+        $this->db->prepare('INSERT INTO encounter_participants(encounter_id,actor_type,actor_id,initiative,state) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE initiative=VALUES(initiative),state=VALUES(state)')->execute([$eid,$kind,$id,$row['initiative'],$state]);
     }
 
     private function validateObjectSize(array $s,int $x,int $y,int $width,int $height): void { if($width<1||$height<1||$width>60||$height>60||$x+$width>(int)$s['width']||$y+$height>(int)$s['height'])throw new RuntimeException('El área del objeto queda fuera del mapa.'); }

@@ -84,11 +84,13 @@ CREATE TABLE scenarios (
  height TINYINT UNSIGNED NOT NULL,
  background_asset_id BIGINT UNSIGNED NULL,
  active BOOLEAN NOT NULL DEFAULT FALSE,
+ is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
  version BIGINT UNSIGNED NOT NULL DEFAULT 0,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
  FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
  FOREIGN KEY (background_asset_id) REFERENCES assets(id) ON DELETE SET NULL,
+ INDEX(campaign_id,is_deleted,active,name),
  CONSTRAINT chk_scenario_size CHECK(width BETWEEN 5 AND 60 AND height BETWEEN 5 AND 60)
 ) ENGINE=InnoDB;
 
@@ -153,6 +155,7 @@ CREATE TABLE npc_characters (
  image_asset_id BIGINT UNSIGNED NULL,
  codex_creature_id BIGINT UNSIGNED NULL,
  health INT NOT NULL DEFAULT 1,
+ max_health INT NULL,
  armor_class INT NULL,
  rotation_degrees SMALLINT UNSIGNED NOT NULL DEFAULT 0,
  initiative INT NULL,
@@ -175,6 +178,7 @@ CREATE TABLE scenario_players (
  x TINYINT UNSIGNED NOT NULL,
  y TINYINT UNSIGNED NOT NULL,
  health INT NOT NULL,
+ token_color VARCHAR(20) NULL,
  initiative INT NULL,
  last_path JSON NULL,
  placed BOOLEAN NOT NULL DEFAULT TRUE,
@@ -212,6 +216,18 @@ CREATE TABLE encounter_participants (
 ) ENGINE=InnoDB;
 
 ALTER TABLE encounters ADD CONSTRAINT fk_encounter_current FOREIGN KEY (current_participant_id) REFERENCES encounter_participants(id) ON DELETE SET NULL;
+
+CREATE TABLE encounter_turn_history (
+ id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ encounter_id BIGINT UNSIGNED NOT NULL,
+ previous_participant_id BIGINT UNSIGNED NULL,
+ previous_round_no INT UNSIGNED NOT NULL,
+ previous_turn_sequence INT UNSIGNED NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ FOREIGN KEY (encounter_id) REFERENCES encounters(id) ON DELETE CASCADE,
+ FOREIGN KEY (previous_participant_id) REFERENCES encounter_participants(id) ON DELETE SET NULL,
+ INDEX(encounter_id,id)
+) ENGINE=InnoDB;
 
 CREATE TABLE turn_delays (
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
