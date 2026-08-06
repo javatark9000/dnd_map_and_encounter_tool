@@ -50,6 +50,9 @@ try {
     if(preg_match('#^/api/codex/customize/(creature|item|spell)/(\d+)$#',$path,$m)&&$method==='PATCH'){ requireDm($user); jsonOut(updateCustomCodexRecord($db,$user,$m[1],(int)$m[2],$body)); }
     if(preg_match('#^/api/codex/customize/creature/(\d+)/deactivate$#',$path,$m)&&$method==='POST'){ requireDm($user); jsonOut(deactivateCustomCreature($db,(int)$m[1])); }
     if(preg_match('#^/api/scenarios/(\d+)/snapshot$#',$path,$m)&&$method==='GET') jsonOut($game->snapshot((int)$m[1],$user));
+    if(preg_match('#^/api/scenarios/(\d+)/encounter-log$#',$path,$m)&&$method==='GET'){
+        requireDm($user);$csv=$game->downloadEncounterLog((int)$m[1],$user);header('Content-Type: text/csv; charset=utf-8');header('Content-Disposition: attachment; filename="encounter-'.$m[1].'-log.csv"');echo $csv;exit;
+    }
 
     if($path==='/api/scenarios'&&$method==='POST'){
         requireDm($user); $w=(int)($body['width']??25);$h=(int)($body['height']??25);if($w<5||$w>60||$h<5||$h>60)throw new RuntimeException('El mapa debe medir entre 5 y 60 casillas.');

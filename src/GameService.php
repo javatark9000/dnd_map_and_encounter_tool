@@ -48,7 +48,17 @@ final class GameService
             $npcs=array_map(fn($n)=>['id'=>$n['id'],'x'=>$n['x'],'y'=>$n['y'],'image_asset_id'=>$n['image_asset_id'],'rotation_degrees'=>$n['rotation_degrees']],$npcs);
             foreach($players as &$pl){ unset($pl['dm_notes']); if($user['role']!=='PLAYER'||(int)$pl['user_id']!==(int)$user['id']) unset($pl['health'],$pl['max_health']); }
         }
-        return ['scenario'=>$s,'blocked'=>$blocked,'objects'=>$objects,'npcs'=>$npcs,'players'=>$players,'encounter'=>$encounter,'participants'=>$participants,'pendingMovements'=>$pending,'cellNotes'=>$notes];
+        $previousEncounterLog=false;if($user['role']==='DM'&&$encounter&&$encounter['state']==='OFF')$previousEncounterLog=$this->hasEncounterHealthLog((int)$encounter['id']);
+        return ['scenario'=>$s,'blocked'=>$blocked,'objects'=>$objects,'npcs'=>$npcs,'players'=>$players,'encounter'=>$encounter,'participants'=>$participants,'pendingMovements'=>$pending,'cellNotes'=>$notes,'previousEncounterLog'=>$previousEncounterLog];
+    }
+
+    public function downloadEncounterLog(int $scenarioId,array $user): string
+    {
+        if($user['role']!=='DM') throw new RuntimeException('Acción exclusiva del DM.');
+        $s=$this->one('SELECT campaign_id FROM scenarios WHERE id=?',[$scenarioId]);if(!$s)throw new RuntimeException('Escenario inexistente.');$this->assertMember((int)$s['campaign_id'],(int)$user['id']);
+        $this->ensureEncounterHealthLogTable();$enc=$this->one('SELECT id FROM encounters WHERE scenario_id=?',[$scenarioId]);if(!$enc)return '';
+        $rows=$this->all('SELECT round_no,actor_type,actor_id,actor_name,action_type,amount,health_before,health_after,created_at FROM encounter_health_log WHERE encounter_id=? ORDER BY id',[$enc['id']]);
+        $out=fopen('php://temp','r+');fputcsv($out,['ronda','tipo','id','nombre','accion','cantidad','vida_antes','vida_despues','fecha']);foreach($rows as $r)fputcsv($out,[$r['round_no'],$r['actor_type'],$r['actor_id'],$r['actor_name'],$r['action_type'],$r['amount'],$r['health_before'],$r['health_after'],$r['created_at']]);rewind($out);return (string)stream_get_contents($out);
     }
 
     public function recordDmView(array $user,int $scenarioId,array $camera): array
@@ -114,6 +124,7 @@ final class GameService
                 'turn.delay'=>$this->turnDelay($scenarioId,$user,$p),
                 'turn.delay_order'=>$this->turnDelayOrder($scenarioId,$p),
                 'health.set'=>$this->healthSet($scenarioId,$p),
+                'player.health.set'=>$this->playerHealthSet($scenarioId,$user,$p),
                 default=>throw new RuntimeException('Comando desconocido.')
             };
             $version=(int)$s['version']+1;
@@ -272,7 +283,7 @@ final class GameService
         return ['id'=>$id,'status'=>$status,'path'=>$path,'scenarioPlayerId'=>$scenarioPlayerId,'userId'=>(int)$m['user_id']];
     }
 
-    private function encounterPrepare(int $sid): array { $this->db->prepare("INSERT INTO encounters(scenario_id,state) VALUES (?,'PREPARING') ON DUPLICATE KEY UPDATE state='PREPARING',round_no=0,current_participant_id=NULL,turn_sequence=0")->execute([$sid]); return ['state'=>'PREPARING']; }
+    private function encounterPrepare(int $sid): array { $this->db->prepare("INSERT INTO encounters(scenario_id,state) VALUES (?,'PREPARING') ON DUPLICATE KEY UPDATE state='PREPARING',round_no=0,current_participant_id=NULL,turn_sequence=0")->execute([$sid]);$enc=$this->one('SELECT id FROM encounters WHERE scenario_id=?',[$sid]);if($enc){$this->ensureEncounterHealthLogTable();$this->db->prepare('DELETE FROM encounter_health_log WHERE encounter_id=?')->execute([$enc['id']]);} return ['state'=>'PREPARING']; }
     private function encounterStart(int $sid,array $p=[]): array
     {
         $e=$this->one('SELECT * FROM encounters WHERE scenario_id=? FOR UPDATE',[$sid]);if(!$e||!in_array($e['state'],['PREPARING','PAUSED']))throw new RuntimeException('Primero prepara el encounter.');
@@ -346,7 +357,32 @@ final class GameService
 
     private function healthSet(int $sid,array $p): array
     {
-        $kind=strtoupper((string)($p['kind']??''));$id=(int)($p['id']??0);$health=(int)($p['health']??0);if($kind==='NPC'){$this->db->prepare('UPDATE npc_characters SET health=? WHERE id=? AND scenario_id=?')->execute([$health,$id,$sid]);if($health<=0)$this->db->prepare("UPDATE encounter_participants ep JOIN encounters e ON e.id=ep.encounter_id SET ep.state='DEAD' WHERE e.scenario_id=? AND ep.actor_type='NPC' AND ep.actor_id=?")->execute([$sid,$id]);}elseif($kind==='PLAYER')$this->db->prepare('UPDATE scenario_players SET health=? WHERE id=? AND scenario_id=?')->execute([$health,$id,$sid]);else throw new RuntimeException('Participante inválido.');return compact('kind','id','health');
+        $kind=strtoupper((string)($p['kind']??''));$id=(int)($p['id']??0);$health=(int)($p['health']??0);$hasMax=array_key_exists('maxHealth',$p);$maxHealth=$hasMax?max(1,(int)$p['maxHealth']):null;
+        $oldHealth=null;$actorName='';
+        if($kind==='NPC'){
+            $old=$this->one('SELECT health,name FROM npc_characters WHERE id=? AND scenario_id=?',[$id,$sid]);if($old){$oldHealth=(int)$old['health'];$actorName=(string)$old['name'];}
+            if($hasMax)$this->db->prepare('UPDATE npc_characters SET health=?,max_health=? WHERE id=? AND scenario_id=?')->execute([$health,$maxHealth,$id,$sid]);
+            else $this->db->prepare('UPDATE npc_characters SET health=? WHERE id=? AND scenario_id=?')->execute([$health,$id,$sid]);
+            if($health<=0)$this->db->prepare("UPDATE encounter_participants ep JOIN encounters e ON e.id=ep.encounter_id SET ep.state='DEAD' WHERE e.scenario_id=? AND ep.actor_type='NPC' AND ep.actor_id=?")->execute([$sid,$id]);
+        }elseif($kind==='PLAYER'){
+            $old=$this->one('SELECT sp.health,pc.name FROM scenario_players sp JOIN player_characters pc ON pc.id=sp.character_id WHERE sp.id=? AND sp.scenario_id=?',[$id,$sid]);if($old){$oldHealth=(int)$old['health'];$actorName=(string)$old['name'];}
+            $this->db->prepare('UPDATE scenario_players SET health=? WHERE id=? AND scenario_id=?')->execute([$health,$id,$sid]);
+            if($hasMax)$this->db->prepare('UPDATE player_characters pc JOIN scenario_players sp ON sp.character_id=pc.id SET pc.max_health=? WHERE sp.id=? AND sp.scenario_id=?')->execute([$maxHealth,$id,$sid]);
+        }else throw new RuntimeException('Participante inválido.');
+        if($oldHealth!==null)$this->logHealthChange($sid,$kind,$id,$actorName,$oldHealth,$health);
+        $out=compact('kind','id','health');if($hasMax)$out['maxHealth']=$maxHealth;return $out;
+    }
+
+    private function playerHealthSet(int $sid,array $user,array $p): array
+    {
+        $id=(int)($p['id']??0);$health=(int)($p['health']??0);
+        $row=$this->one('SELECT sp.id,pc.max_health FROM scenario_players sp JOIN player_characters pc ON pc.id=sp.character_id WHERE sp.id=? AND sp.scenario_id=? AND sp.user_id=? AND sp.placed=1',[$id,$sid,$user['id']]);
+        if(!$row) throw new RuntimeException('Solo puedes curar tu propia ficha seleccionada.');
+        $max=(int)$row['max_health'];$health=max(0,min($max,$health));
+        $old=$this->one('SELECT sp.health,pc.name FROM scenario_players sp JOIN player_characters pc ON pc.id=sp.character_id WHERE sp.id=? AND sp.scenario_id=? AND sp.user_id=?',[$id,$sid,$user['id']]);
+        $this->db->prepare('UPDATE scenario_players SET health=? WHERE id=? AND scenario_id=? AND user_id=?')->execute([$health,$id,$sid,$user['id']]);
+        if($old)$this->logHealthChange($sid,'PLAYER',$id,(string)$old['name'],(int)$old['health'],$health);
+        return ['kind'=>'PLAYER','id'=>$id,'health'=>$health];
     }
 
     private function syncParticipants(int $eid,int $sid): void
@@ -365,6 +401,18 @@ final class GameService
         elseif($kind==='NPC'){$row=$this->one('SELECT initiative,health FROM npc_characters WHERE id=? AND scenario_id=? AND visible=1',[$id,$sid]);if(!$row)throw new RuntimeException('NPC no válido para combate.');$state=((int)$row['health']<=0)?'DEAD':'ACTIVE';}
         else throw new RuntimeException('Tipo de participante inválido.');
         $this->db->prepare('INSERT INTO encounter_participants(encounter_id,actor_type,actor_id,initiative,state) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE initiative=VALUES(initiative),state=VALUES(state)')->execute([$eid,$kind,$id,$row['initiative'],$state]);
+    }
+
+    private function ensureEncounterHealthLogTable(): void
+    {
+        $this->db->exec("CREATE TABLE IF NOT EXISTS encounter_health_log (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, encounter_id BIGINT UNSIGNED NOT NULL, round_no INT UNSIGNED NOT NULL DEFAULT 0, actor_type ENUM('PLAYER','NPC') NOT NULL, actor_id BIGINT UNSIGNED NOT NULL, actor_name VARCHAR(120) NOT NULL, action_type ENUM('DAMAGE','HEAL') NOT NULL, amount INT NOT NULL, health_before INT NOT NULL, health_after INT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, INDEX(encounter_id,id), INDEX(encounter_id,actor_type,actor_id)) ENGINE=InnoDB");
+    }
+    private function hasEncounterHealthLog(int $encounterId): bool { $this->ensureEncounterHealthLogTable();return (bool)$this->one('SELECT 1 FROM encounter_health_log WHERE encounter_id=? LIMIT 1',[$encounterId]); }
+    private function logHealthChange(int $sid,string $kind,int $id,string $name,int $before,int $after): void
+    {
+        if($before===$after)return;$enc=$this->one("SELECT id,round_no,state FROM encounters WHERE scenario_id=? AND state<>'OFF'",[$sid]);if(!$enc)return;
+        $amount=abs($after-$before);$action=$after<$before?'DAMAGE':'HEAL';$this->ensureEncounterHealthLogTable();
+        $this->db->prepare('INSERT INTO encounter_health_log(encounter_id,round_no,actor_type,actor_id,actor_name,action_type,amount,health_before,health_after) VALUES (?,?,?,?,?,?,?,?,?)')->execute([$enc['id'],(int)$enc['round_no'],$kind,$id,$name,$action,$amount,$before,$after]);
     }
 
     private function validateObjectSize(array $s,int $x,int $y,int $width,int $height): void { if($width<1||$height<1||$width>60||$height>60||$x+$width>(int)$s['width']||$y+$height>(int)$s['height'])throw new RuntimeException('El área del objeto queda fuera del mapa.'); }
