@@ -1,0 +1,235 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+3 0 obj
+<< /Length 3325 >>
+stream
+BT
+/F2 16 Tf
+1 0 0 1 54.00 738.00 Tm
+(Updates After Last Commit) Tj
+/F1 11 Tf
+1 0 0 1 64.00 720.00 Tm
+(- Reference commit in this checkout: 7268176 - 2026-08-05 - Bug fixes) Tj
+/F1 11 Tf
+1 0 0 1 64.00 706.00 Tm
+(- This document summarizes the uncommitted updates made after that commit.) Tj
+/F2 16 Tf
+1 0 0 1 54.00 684.00 Tm
+(Changed files) Tj
+/F1 11 Tf
+1 0 0 1 64.00 666.00 Tm
+(- database/schema.sql) Tj
+/F1 11 Tf
+1 0 0 1 64.00 652.00 Tm
+(- public/app.html) Tj
+/F1 11 Tf
+1 0 0 1 64.00 638.00 Tm
+(- public/assets/app.js) Tj
+/F1 11 Tf
+1 0 0 1 64.00 624.00 Tm
+(- public/assets/styles.css) Tj
+/F1 11 Tf
+1 0 0 1 64.00 610.00 Tm
+(- public/index.php) Tj
+/F1 11 Tf
+1 0 0 1 64.00 596.00 Tm
+(- src/GameService.php) Tj
+/F1 11 Tf
+1 0 0 1 64.00 582.00 Tm
+(- src/WebSocketServer.php) Tj
+/F2 16 Tf
+1 0 0 1 54.00 560.00 Tm
+(Map / movement) Tj
+/F1 11 Tf
+1 0 0 1 64.00 542.00 Tm
+(- Fixed mobile zoom behavior after pinch.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 528.00 Tm
+(- Added double tap to zoom/focus a specific section of the active map.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 514.00 Tm
+(- Added Editar mapa so DM can cut/focus a specific map portion for player view.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 500.00 Tm
+(- Added Quitar recorte.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 486.00 Tm
+(- Added bright border on DM view for the focused map area.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 472.00 Tm
+(- Added movement request preview: clicking/hovering a Solicitud shows a miniature) Tj
+/F1 11 Tf
+1 0 0 1 74.00 458.00 Tm
+(  opaque path preview.) Tj
+/F2 16 Tf
+1 0 0 1 54.00 436.00 Tm
+(Tokens / placement) Tj
+/F1 11 Tf
+1 0 0 1 64.00 418.00 Tm
+(- Player can only use Colocar once per character per scenario.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 404.00 Tm
+(- Player token background/color is chosen once and reused.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 390.00 Tm
+(- Added player rotation buttons.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 376.00 Tm
+(- Added small arrow indicator to player tokens.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 362.00 Tm
+(- Copiar vivos now copies only non-player/NPC tokens from previous scenario.) Tj
+/F2 16 Tf
+1 0 0 1 54.00 340.00 Tm
+(Drawing mode) Tj
+/F1 11 Tf
+1 0 0 1 64.00 322.00 Tm
+(- Added Dibujar freehand mode.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 308.00 Tm
+(- Drawing mode replaces token buttons with: Lapiz, Borrador, Borrar Todo) Tj
+/F1 11 Tf
+1 0 0 1 74.00 294.00 Tm
+(  \(DM-only\), Tamano: N with + / -, and Salir.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 280.00 Tm
+(- Drawings are live-visible to DM, players, and guests.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 266.00 Tm
+(- Drawings do not persist after reload/session.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 252.00 Tm
+(- Salir clears that player's drawings.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 238.00 Tm
+(- Players erase only their own drawings.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 224.00 Tm
+(- DM can erase any drawing or Borrar Todo.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 210.00 Tm
+(- Drawing point spacing is configurable with DRAW_POINT_MIN_DISTANCE.) Tj
+/F2 16 Tf
+1 0 0 1 54.00 188.00 Tm
+(Drawing colors) Tj
+/F1 11 Tf
+1 0 0 1 64.00 170.00 Tm
+(- Added drawing_color to player_characters.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 156.00 Tm
+(- Default drawing color is #ffffff.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 142.00 Tm
+(- Existing characters were set to white.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 128.00 Tm
+(- DM player-token inspector shows the small color circle beside player token) Tj
+/F1 11 Tf
+1 0 0 1 74.00 114.00 Tm
+(  names.) Tj
+ET
+endstream
+endobj
+4 0 obj
+<< /Length 1749 >>
+stream
+BT
+/F2 16 Tf
+1 0 0 1 54.00 738.00 Tm
+(Chat / notifications) Tj
+/F1 11 Tf
+1 0 0 1 64.00 720.00 Tm
+(- Added private player to DM only chat.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 706.00 Tm
+(- Player chat appears under Codex in the left menu.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 692.00 Tm
+(- DM sees chats in right-side menu and floating chat windows.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 678.00 Tm
+(- Chat notifications added.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 664.00 Tm
+(- DM gets popup notification for movement requests.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 650.00 Tm
+(- Clicking request notification focuses Solicitudes.) Tj
+/F2 16 Tf
+1 0 0 1 54.00 628.00 Tm
+(Codex) Tj
+/F1 11 Tf
+1 0 0 1 64.00 610.00 Tm
+(- Split Conjuros from Acciones y rasgos.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 596.00 Tm
+(- Codex searches are now name/title-only by default.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 582.00 Tm
+(- DM monster/creature search still searches traits, abilities, descriptions, etc.) Tj
+/F2 16 Tf
+1 0 0 1 54.00 560.00 Tm
+(HP / health) Tj
+/F1 11 Tf
+1 0 0 1 64.00 542.00 Tm
+(- Player tokens can go down to -10.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 528.00 Tm
+(- NPC tokens cap at 0.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 514.00 Tm
+(- Player card and DM info can display player HP down to -10.) Tj
+/F2 16 Tf
+1 0 0 1 54.00 492.00 Tm
+(DB/schema additions) Tj
+/F1 11 Tf
+1 0 0 1 64.00 474.00 Tm
+(- Added schema support for scenario_map_focus.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 460.00 Tm
+(- Added schema support for dm_player_chats.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 446.00 Tm
+(- Added schema support for dm_player_chat_messages.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 432.00 Tm
+(- Added schema support for scenario_players.rotation_degrees.) Tj
+/F1 11 Tf
+1 0 0 1 64.00 418.00 Tm
+(- Added schema support for player_characters.drawing_color DEFAULT '#ffffff'.) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 7 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 3 0 R >>
+endobj
+6 0 obj
+<< /Type /Page /Parent 7 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 4 0 R >>
+endobj
+7 0 obj
+<< /Type /Pages /Kids [5 0 R 6 0 R] /Count 2 >>
+endobj
+8 0 obj
+<< /Type /Catalog /Pages 7 0 R >>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000009 00000 n 
+0000000079 00000 n 
+0000000154 00000 n 
+0000003531 00000 n 
+0000005332 00000 n 
+0000005468 00000 n 
+0000005604 00000 n 
+0000005667 00000 n 
+trailer
+<< /Size 9 /Root 8 0 R >>
+startxref
+5716
+%%EOF

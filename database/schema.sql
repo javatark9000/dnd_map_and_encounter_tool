@@ -58,6 +58,7 @@ CREATE TABLE player_characters (
  campaign_id BIGINT UNSIGNED NOT NULL,
  name VARCHAR(100) NOT NULL,
  avatar_asset_id BIGINT UNSIGNED NULL,
+ drawing_color VARCHAR(20) NOT NULL DEFAULT '#ffffff',
  max_health INT NOT NULL DEFAULT 10,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -112,6 +113,16 @@ CREATE TABLE blocked_cells (
  x TINYINT UNSIGNED NOT NULL,
  y TINYINT UNSIGNED NOT NULL,
  PRIMARY KEY(scenario_id,x,y),
+ FOREIGN KEY (scenario_id) REFERENCES scenarios(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE scenario_map_focus (
+ scenario_id BIGINT UNSIGNED PRIMARY KEY,
+ x INT UNSIGNED NOT NULL,
+ y INT UNSIGNED NOT NULL,
+ width_cells INT UNSIGNED NOT NULL,
+ height_cells INT UNSIGNED NOT NULL,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
  FOREIGN KEY (scenario_id) REFERENCES scenarios(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
@@ -179,6 +190,7 @@ CREATE TABLE scenario_players (
  y TINYINT UNSIGNED NOT NULL,
  health INT NOT NULL,
  token_color VARCHAR(20) NULL,
+ rotation_degrees SMALLINT UNSIGNED NOT NULL DEFAULT 0,
  initiative INT NULL,
  last_path JSON NULL,
  placed BOOLEAN NOT NULL DEFAULT TRUE,
@@ -242,6 +254,23 @@ CREATE TABLE turn_delays (
  FOREIGN KEY (target_participant_id) REFERENCES encounter_participants(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+CREATE TABLE encounter_health_log (
+ id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ encounter_id BIGINT UNSIGNED NOT NULL,
+ round_no INT UNSIGNED NOT NULL DEFAULT 0,
+ actor_type ENUM('PLAYER','NPC') NOT NULL,
+ actor_id BIGINT UNSIGNED NOT NULL,
+ actor_name VARCHAR(120) NOT NULL,
+ action_type ENUM('DAMAGE','HEAL') NOT NULL,
+ amount INT NOT NULL,
+ health_before INT NOT NULL,
+ health_after INT NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ FOREIGN KEY (encounter_id) REFERENCES encounters(id) ON DELETE CASCADE,
+ INDEX(encounter_id,id),
+ INDEX(encounter_id,actor_type,actor_id)
+) ENGINE=InnoDB;
+
 CREATE TABLE movement_requests (
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
  scenario_id BIGINT UNSIGNED NOT NULL,
@@ -271,6 +300,32 @@ CREATE TABLE scenario_events (
  UNIQUE(scenario_id,version),
  FOREIGN KEY (scenario_id) REFERENCES scenarios(id) ON DELETE CASCADE,
  FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE dm_player_chats (
+ id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ campaign_id BIGINT UNSIGNED NOT NULL,
+ player_id BIGINT UNSIGNED NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+ UNIQUE(campaign_id,player_id),
+ FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
+ FOREIGN KEY (player_id) REFERENCES users(id) ON DELETE CASCADE,
+ INDEX(campaign_id,updated_at)
+) ENGINE=InnoDB;
+
+CREATE TABLE dm_player_chat_messages (
+ id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ chat_id BIGINT UNSIGNED NOT NULL,
+ sender_id BIGINT UNSIGNED NOT NULL,
+ message TEXT NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ read_by_dm BOOLEAN NOT NULL DEFAULT FALSE,
+ read_by_player BOOLEAN NOT NULL DEFAULT FALSE,
+ FOREIGN KEY (chat_id) REFERENCES dm_player_chats(id) ON DELETE CASCADE,
+ FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+ INDEX(chat_id,id),
+ INDEX(sender_id,created_at)
 ) ENGINE=InnoDB;
 
 CREATE TABLE command_receipts (

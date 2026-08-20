@@ -13,7 +13,7 @@ final class GameService
     public function bootstrap(array $user): array
     {
         $campaigns=$this->all('SELECT c.* FROM campaigns c JOIN campaign_members m ON m.campaign_id=c.id WHERE m.user_id=? ORDER BY c.id',[$user['id']]);
-        $characters=$user['role']==='PLAYER' ? $this->all('SELECT p.*,a.path avatar_path FROM player_characters p LEFT JOIN assets a ON a.id=p.avatar_asset_id WHERE p.owner_id=?',[$user['id']]) : [];
+        $characters=$user['role']==='PLAYER' ? $this->all('SELECT p.*,a.path avatar_path,(SELECT sp.token_color FROM scenario_players sp WHERE sp.character_id=p.id AND sp.token_color IS NOT NULL ORDER BY sp.id DESC LIMIT 1) token_color FROM player_characters p LEFT JOIN assets a ON a.id=p.avatar_asset_id WHERE p.owner_id=?',[$user['id']]) : [];
         $scenarioSql='SELECT s.*,a.path background_path FROM scenarios s LEFT JOIN assets a ON a.id=s.background_asset_id WHERE s.campaign_id IN (SELECT campaign_id FROM campaign_members WHERE user_id=?) AND s.is_deleted=0';
         if($user['role']!=='DM') $scenarioSql.=' AND s.active=1';
         $scenarioSql.=' ORDER BY s.active DESC,s.name';
@@ -28,12 +28,14 @@ final class GameService
         if(!$s || !empty($s['is_deleted'])) throw new RuntimeException('Escenario inexistente.');
         $this->assertMember((int)$s['campaign_id'],(int)$user['id']);
         if($user['role']!=='DM' && !(bool)$s['active']) throw new RuntimeException('El escenario no está activo.');
+        $this->ensureMapFocusTable();$mapFocus=$this->one('SELECT x,y,width_cells,height_cells FROM scenario_map_focus WHERE scenario_id=?',[$scenarioId])?:null;
         $blocked=$this->all('SELECT x,y FROM blocked_cells WHERE scenario_id=?',[$scenarioId]);
         $objects=$this->all('SELECT o.*,a.path image_path FROM map_objects o LEFT JOIN assets a ON a.id=o.image_asset_id WHERE o.scenario_id=?'.($user['role']==='DM'?'':' AND o.visible=1'),[$scenarioId]);
         $npcSql='SELECT n.*,COALESCE(n.max_health,n.health) max_health,a.path image_path FROM npc_characters n LEFT JOIN assets a ON a.id=n.image_asset_id WHERE n.scenario_id=?';
         if($user['role']!=='DM') $npcSql.=' AND n.visible=1 AND NOT(n.health<=0 OR n.dead_hidden=1)';
         $npcs=$this->all($npcSql,[$scenarioId]);
-        $players=$this->all('SELECT sp.*,u.name user_name,pc.name,pc.max_health,pc.avatar_asset_id image_asset_id,a.path image_path,dpn.notes dm_notes FROM scenario_players sp JOIN users u ON u.id=sp.user_id JOIN player_characters pc ON pc.id=sp.character_id LEFT JOIN assets a ON a.id=pc.avatar_asset_id LEFT JOIN dm_player_notes dpn ON dpn.player_id=sp.user_id AND dpn.campaign_id=pc.campaign_id WHERE sp.scenario_id=?'.($user['role']==='DM'?'':' AND sp.placed=1'),[$scenarioId]);
+        $this->ensurePlayerCharacterDrawingColorColumn();
+        $players=$this->all('SELECT sp.*,u.name user_name,pc.name,pc.max_health,pc.drawing_color,pc.avatar_asset_id image_asset_id,a.path image_path,dpn.notes dm_notes FROM scenario_players sp JOIN users u ON u.id=sp.user_id JOIN player_characters pc ON pc.id=sp.character_id LEFT JOIN assets a ON a.id=pc.avatar_asset_id LEFT JOIN dm_player_notes dpn ON dpn.player_id=sp.user_id AND dpn.campaign_id=pc.campaign_id WHERE sp.scenario_id=?'.($user['role']==='DM'?'':' AND sp.placed=1'),[$scenarioId]);
         $encounter=$this->one('SELECT * FROM encounters WHERE scenario_id=?',[$scenarioId]);
         $participants=[];
         if($encounter) $participants=$this->all('SELECT * FROM encounter_participants WHERE encounter_id=? ORDER BY initiative DESC,tie_order,id',[$encounter['id']]);
@@ -49,7 +51,7 @@ final class GameService
             foreach($players as &$pl){ unset($pl['dm_notes']); if($user['role']!=='PLAYER'||(int)$pl['user_id']!==(int)$user['id']) unset($pl['health'],$pl['max_health']); }
         }
         $previousEncounterLog=false;if($user['role']==='DM'&&$encounter&&$encounter['state']==='OFF')$previousEncounterLog=$this->hasEncounterHealthLog((int)$encounter['id']);
-        return ['scenario'=>$s,'blocked'=>$blocked,'objects'=>$objects,'npcs'=>$npcs,'players'=>$players,'encounter'=>$encounter,'participants'=>$participants,'pendingMovements'=>$pending,'cellNotes'=>$notes,'previousEncounterLog'=>$previousEncounterLog];
+        return ['scenario'=>$s,'mapFocus'=>$mapFocus,'blocked'=>$blocked,'objects'=>$objects,'npcs'=>$npcs,'players'=>$players,'encounter'=>$encounter,'participants'=>$participants,'pendingMovements'=>$pending,'cellNotes'=>$notes,'previousEncounterLog'=>$previousEncounterLog];
     }
 
     public function downloadEncounterLog(int $scenarioId,array $user): string
@@ -59,6 +61,29 @@ final class GameService
         $this->ensureEncounterHealthLogTable();$enc=$this->one('SELECT id FROM encounters WHERE scenario_id=?',[$scenarioId]);if(!$enc)return '';
         $rows=$this->all('SELECT round_no,actor_type,actor_id,actor_name,action_type,amount,health_before,health_after,created_at FROM encounter_health_log WHERE encounter_id=? ORDER BY id',[$enc['id']]);
         $out=fopen('php://temp','r+');fputcsv($out,['ronda','tipo','id','nombre','accion','cantidad','vida_antes','vida_despues','fecha']);foreach($rows as $r)fputcsv($out,[$r['round_no'],$r['actor_type'],$r['actor_id'],$r['actor_name'],$r['action_type'],$r['amount'],$r['health_before'],$r['health_after'],$r['created_at']]);rewind($out);return (string)stream_get_contents($out);
+    }
+
+    public function chatThreads(int $scenarioId,array $user): array
+    {
+        $s=$this->one('SELECT campaign_id FROM scenarios WHERE id=?',[$scenarioId]);if(!$s)throw new RuntimeException('Escenario inexistente.');$cid=(int)$s['campaign_id'];$this->assertMember($cid,(int)$user['id']);$this->ensureChatTables();
+        if($user['role']==='PLAYER')$this->ensurePlayerChat($cid,(int)$user['id']);
+        $where=$user['role']==='DM'?'c.campaign_id=?':'c.campaign_id=? AND c.player_id=?';$args=$user['role']==='DM'?[$cid]:[$cid,$user['id']];
+        return $this->all("SELECT c.id,c.player_id,u.name player_name,(SELECT m.message FROM dm_player_chat_messages m WHERE m.chat_id=c.id ORDER BY m.id DESC LIMIT 1) last_message,(SELECT m.created_at FROM dm_player_chat_messages m WHERE m.chat_id=c.id ORDER BY m.id DESC LIMIT 1) last_at,(SELECT COUNT(*) FROM dm_player_chat_messages m WHERE m.chat_id=c.id AND ".($user['role']==='DM'?'m.read_by_dm=0 AND m.sender_id<>?':'m.read_by_player=0 AND m.sender_id<>?').") unread FROM dm_player_chats c JOIN users u ON u.id=c.player_id WHERE $where ORDER BY COALESCE(last_at,c.updated_at) DESC",array_merge([$user['id']],$args));
+    }
+    public function chatMessages(int $chatId,array $user): array
+    {
+        $this->ensureChatTables();$chat=$this->one('SELECT * FROM dm_player_chats WHERE id=?',[$chatId]);if(!$chat)throw new RuntimeException('Chat inexistente.');$this->assertMember((int)$chat['campaign_id'],(int)$user['id']);if($user['role']!=='DM'&&(int)$chat['player_id']!==(int)$user['id'])throw new RuntimeException('Sin acceso al chat.');
+        $this->db->prepare('UPDATE dm_player_chat_messages SET '.($user['role']==='DM'?'read_by_dm=1':'read_by_player=1').' WHERE chat_id=? AND sender_id<>?')->execute([$chatId,$user['id']]);
+        return ['chat'=>$chat,'messages'=>$this->all('SELECT m.*,u.name sender_name,u.role sender_role FROM dm_player_chat_messages m JOIN users u ON u.id=m.sender_id WHERE m.chat_id=? ORDER BY m.id LIMIT 200',[$chatId])];
+    }
+    public function sendChatMessage(int $scenarioId,array $user,array $p): array
+    {
+        $msg=trim((string)($p['message']??''));if($msg==='')throw new RuntimeException('Escribe un mensaje.');if(mb_strlen($msg)>2000)$msg=mb_substr($msg,0,2000);$s=$this->one('SELECT campaign_id FROM scenarios WHERE id=?',[$scenarioId]);if(!$s)throw new RuntimeException('Escenario inexistente.');$cid=(int)$s['campaign_id'];$this->assertMember($cid,(int)$user['id']);$this->ensureChatTables();
+        if($user['role']==='DM'){$chatId=(int)($p['chatId']??0);$chat=$this->one('SELECT * FROM dm_player_chats WHERE id=? AND campaign_id=?',[$chatId,$cid]);if(!$chat)throw new RuntimeException('Chat inválido.');}
+        elseif($user['role']==='PLAYER'){$chat=$this->ensurePlayerChat($cid,(int)$user['id']);$chatId=(int)$chat['id'];}
+        else throw new RuntimeException('Chat no disponible.');
+        $this->db->prepare('INSERT INTO dm_player_chat_messages(chat_id,sender_id,message,read_by_dm,read_by_player) VALUES (?,?,?,?,?)')->execute([$chatId,$user['id'],$msg,$user['role']==='DM'?1:0,$user['role']==='PLAYER'?1:0]);$mid=(int)$this->db->lastInsertId();$this->db->prepare('UPDATE dm_player_chats SET updated_at=NOW() WHERE id=?')->execute([$chatId]);
+        $row=$this->one('SELECT c.id chat_id,c.player_id,u.name player_name,m.id message_id,m.message,m.created_at,su.name sender_name,su.role sender_role FROM dm_player_chats c JOIN users u ON u.id=c.player_id JOIN dm_player_chat_messages m ON m.id=? JOIN users su ON su.id=m.sender_id WHERE c.id=?',[$mid,$chatId]);return $row?:[];
     }
 
     public function recordDmView(array $user,int $scenarioId,array $camera): array
@@ -90,12 +115,15 @@ final class GameService
             $s=$this->one('SELECT * FROM scenarios WHERE id=? FOR UPDATE',[$scenarioId]);
             if(!$s) throw new RuntimeException('Escenario inexistente.');
             $this->assertMember((int)$s['campaign_id'],(int)$user['id']);
-            $dmOnly=['scenario.activate','scenario.deactivate','scenario.hide','map.cells.paint','object.create','objects.bulk_update','tokens.bulk_update','tokens.delete','npc.create','token.update','token.delete','token.clone','token.move_dm','movement.approve','movement.reject','encounter.prepare','encounter.start','encounter.include','encounter.restart_round','encounter.stop','initiative.set','initiative.reorder_tie','turn.next','turn.rollback','turn.delay_order','health.set','cell.note','player.note'];
+            $dmOnly=['scenario.activate','scenario.deactivate','scenario.hide','scenario.copy_alive_previous','map.focus','map.focus.clear','map.cells.paint','object.create','objects.bulk_update','tokens.bulk_update','tokens.delete','npc.create','token.update','token.delete','token.clone','token.move_dm','movement.approve','movement.reject','encounter.prepare','encounter.start','encounter.include','encounter.restart_round','encounter.stop','initiative.set','initiative.reorder_tie','turn.next','turn.rollback','turn.delay_order','health.set','cell.note','player.note'];
             if(in_array($type,$dmOnly,true) && $user['role']!=='DM') throw new RuntimeException('Acción exclusiva del DM.');
             $data=match($type){
                 'scenario.activate'=>$this->activate($scenarioId,true),
                 'scenario.deactivate'=>$this->activate($scenarioId,false),
                 'scenario.hide'=>$this->hideScenario($scenarioId),
+                'scenario.copy_alive_previous'=>$this->copyAliveFromPreviousScenario($s),
+                'map.focus'=>$this->setMapFocus($s,$p),
+                'map.focus.clear'=>$this->clearMapFocus($s),
                 'map.cells.paint'=>$this->paint($s,$p),
                 'cell.note'=>$this->cellNote($s,$p),
                 'player.note'=>$this->playerNote($s,$p),
@@ -125,6 +153,7 @@ final class GameService
                 'turn.delay_order'=>$this->turnDelayOrder($scenarioId,$p),
                 'health.set'=>$this->healthSet($scenarioId,$p),
                 'player.health.set'=>$this->playerHealthSet($scenarioId,$user,$p),
+                'player.rotate'=>$this->playerRotate($scenarioId,$user,$p),
                 default=>throw new RuntimeException('Comando desconocido.')
             };
             $version=(int)$s['version']+1;
@@ -138,6 +167,14 @@ final class GameService
     }
 
     private function activate(int $id,bool $active): array { $this->db->prepare('UPDATE scenarios SET active=? WHERE id=? AND is_deleted=0')->execute([$active?1:0,$id]); if(!$active)$this->db->prepare('UPDATE scenario_players SET placed=0 WHERE scenario_id=?')->execute([$id]); return ['active'=>$active]; }
+    private function copyAliveFromPreviousScenario(array $s): array
+    {
+        $src=$this->one("SELECT s2.id FROM scenarios s2 WHERE s2.campaign_id=? AND s2.id<>? AND s2.is_deleted=0 AND EXISTS(SELECT 1 FROM npc_characters n WHERE n.scenario_id=s2.id AND n.health>0) ORDER BY s2.active DESC,s2.id DESC LIMIT 1",[$s['campaign_id'],$s['id']]);
+        if(!$src)throw new RuntimeException('No hay escenario anterior con tokens no-jugador vivos.');$sourceId=(int)$src['id'];$copiedNpcs=0;
+        $npcs=$this->all('SELECT * FROM npc_characters WHERE scenario_id=? AND health>0',[$sourceId]);
+        foreach($npcs as $n){$x=min((int)$s['width']-1,max(0,(int)$n['x']));$y=min((int)$s['height']-1,max(0,(int)$n['y']));$this->db->prepare('INSERT INTO npc_characters(scenario_id,name,x,y,notes,image_asset_id,codex_creature_id,health,max_health,armor_class,rotation_degrees,initiative,visible,dead_hidden) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')->execute([$s['id'],$n['name'],$x,$y,$n['notes'],$n['image_asset_id'],$n['codex_creature_id'],$n['health'],$n['max_health']??$n['health'],$n['armor_class'],$n['rotation_degrees'],$n['initiative'],$n['visible'],$n['dead_hidden']]);$copiedNpcs++;}
+        return ['sourceScenarioId'=>$sourceId,'npcs'=>$copiedNpcs];
+    }
     private function hideScenario(int $id): array { $this->db->prepare('UPDATE scenarios SET is_deleted=1,active=0 WHERE id=?')->execute([$id]); $this->db->prepare('UPDATE scenario_players SET placed=0 WHERE scenario_id=?')->execute([$id]); $this->db->prepare('DELETE FROM dm_scenario_views WHERE scenario_id=?')->execute([$id]); return ['hidden'=>true]; }
 
     private function paint(array $s,array $p): array
@@ -249,8 +286,10 @@ final class GameService
     {
         if($u['role']!=='PLAYER')throw new RuntimeException('Solo los jugadores se colocan.'); if(!$s['active'])throw new RuntimeException('El escenario no está activo.'); [$x,$y]=$this->coords($s,$p);
         $cid=(int)($p['characterId']??0); $c=$this->one('SELECT * FROM player_characters WHERE id=? AND owner_id=? AND campaign_id=?',[$cid,$u['id'],$s['campaign_id']]); if(!$c)throw new RuntimeException('Personaje inválido.');
+        if($this->one('SELECT 1 FROM scenario_players WHERE scenario_id=? AND character_id=? AND placed=1',[$s['id'],$cid])) throw new RuntimeException('Ya colocaste este personaje en este escenario. Pide al DM que lo mueva si necesitas cambiarlo de lugar.');
         $this->db->prepare('UPDATE scenario_players SET placed=0 WHERE character_id=?')->execute([$cid]);
-        $color=$this->playerTokenColor($p['tokenColor']??null);
+        $picked=$p['tokenColor']??null;if($picked===null||$picked===''){$prev=$this->one('SELECT token_color FROM scenario_players WHERE character_id=? AND token_color IS NOT NULL ORDER BY id DESC LIMIT 1',[$cid]);$picked=$prev['token_color']??null;}
+        $color=$this->playerTokenColor($picked);
         $this->db->prepare('INSERT INTO scenario_players(scenario_id,user_id,character_id,x,y,health,token_color) VALUES (?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id),user_id=VALUES(user_id),x=VALUES(x),y=VALUES(y),health=VALUES(health),token_color=VALUES(token_color),last_path=NULL,placed=1')->execute([$s['id'],$u['id'],$cid,$x,$y,$c['max_health'],$color]);
         return ['scenarioPlayerId'=>(int)$this->db->lastInsertId(),'userId'=>$u['id'],'characterId'=>$cid,'x'=>$x,'y'=>$y];
     }
@@ -357,7 +396,7 @@ final class GameService
 
     private function healthSet(int $sid,array $p): array
     {
-        $kind=strtoupper((string)($p['kind']??''));$id=(int)($p['id']??0);$health=(int)($p['health']??0);$hasMax=array_key_exists('maxHealth',$p);$maxHealth=$hasMax?max(1,(int)$p['maxHealth']):null;
+        $kind=strtoupper((string)($p['kind']??''));$id=(int)($p['id']??0);$health=(int)($p['health']??0);if($kind==='PLAYER')$health=max(-10,$health);elseif($kind==='NPC')$health=max(0,$health);$hasMax=array_key_exists('maxHealth',$p);$maxHealth=$hasMax?max(1,(int)$p['maxHealth']):null;
         $oldHealth=null;$actorName='';
         if($kind==='NPC'){
             $old=$this->one('SELECT health,name FROM npc_characters WHERE id=? AND scenario_id=?',[$id,$sid]);if($old){$oldHealth=(int)$old['health'];$actorName=(string)$old['name'];}
@@ -385,6 +424,16 @@ final class GameService
         return ['kind'=>'PLAYER','id'=>$id,'health'=>$health];
     }
 
+    private function playerRotate(int $sid,array $user,array $p): array
+    {
+        if($user['role']!=='PLAYER')throw new RuntimeException('Rotación de jugador inválida.');
+        $this->db->exec('ALTER TABLE scenario_players ADD COLUMN IF NOT EXISTS rotation_degrees SMALLINT UNSIGNED NOT NULL DEFAULT 0 AFTER token_color');
+        $id=(int)($p['id']??0);$degrees=$this->snapRotation((int)($p['rotation_degrees']??0));
+        $this->db->prepare('UPDATE scenario_players SET rotation_degrees=? WHERE id=? AND scenario_id=? AND user_id=? AND placed=1')->execute([$degrees,$id,$sid,$user['id']]);
+        if($this->db->query('SELECT ROW_COUNT()')->fetchColumn()<1)throw new RuntimeException('Solo puedes rotar tu propia ficha seleccionada.');
+        return ['kind'=>'PLAYER','id'=>$id,'rotation_degrees'=>$degrees];
+    }
+
     private function syncParticipants(int $eid,int $sid): void
     {
         $this->db->prepare("INSERT INTO encounter_participants(encounter_id,actor_type,actor_id,initiative) SELECT ?,'PLAYER',id,initiative FROM scenario_players WHERE scenario_id=? AND placed=1 AND initiative IS NOT NULL ON DUPLICATE KEY UPDATE initiative=VALUES(initiative),state=IF(state='REMOVED',state,'ACTIVE')")->execute([$eid,$sid]);
@@ -401,6 +450,28 @@ final class GameService
         elseif($kind==='NPC'){$row=$this->one('SELECT initiative,health FROM npc_characters WHERE id=? AND scenario_id=? AND visible=1',[$id,$sid]);if(!$row)throw new RuntimeException('NPC no válido para combate.');$state=((int)$row['health']<=0)?'DEAD':'ACTIVE';}
         else throw new RuntimeException('Tipo de participante inválido.');
         $this->db->prepare('INSERT INTO encounter_participants(encounter_id,actor_type,actor_id,initiative,state) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE initiative=VALUES(initiative),state=VALUES(state)')->execute([$eid,$kind,$id,$row['initiative'],$state]);
+    }
+
+    private function ensurePlayerCharacterDrawingColorColumn(): void { $this->db->exec("ALTER TABLE player_characters ADD COLUMN IF NOT EXISTS drawing_color VARCHAR(20) NOT NULL DEFAULT '#ffffff' AFTER avatar_asset_id"); }
+
+    private function ensureMapFocusTable(): void
+    {
+        $this->db->exec('CREATE TABLE IF NOT EXISTS scenario_map_focus (scenario_id BIGINT UNSIGNED PRIMARY KEY, x INT UNSIGNED NOT NULL, y INT UNSIGNED NOT NULL, width_cells INT UNSIGNED NOT NULL, height_cells INT UNSIGNED NOT NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) ENGINE=InnoDB');
+    }
+    private function setMapFocus(array $s,array $p): array
+    {
+        $this->ensureMapFocusTable();$x=max(0,(int)($p['x']??0));$y=max(0,(int)($p['y']??0));$w=max(1,(int)($p['widthCells']??1));$h=max(1,(int)($p['heightCells']??1));if($x+$w>(int)$s['width'])$w=(int)$s['width']-$x;if($y+$h>(int)$s['height'])$h=(int)$s['height']-$y;if($w<1||$h<1)throw new RuntimeException('Área de mapa inválida.');$this->db->prepare('INSERT INTO scenario_map_focus(scenario_id,x,y,width_cells,height_cells) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE x=VALUES(x),y=VALUES(y),width_cells=VALUES(width_cells),height_cells=VALUES(height_cells)')->execute([$s['id'],$x,$y,$w,$h]);return ['x'=>$x,'y'=>$y,'widthCells'=>$w,'heightCells'=>$h];
+    }
+    private function clearMapFocus(array $s): array { $this->ensureMapFocusTable();$this->db->prepare('DELETE FROM scenario_map_focus WHERE scenario_id=?')->execute([$s['id']]);return ['cleared'=>true]; }
+
+    private function ensureChatTables(): void
+    {
+        $this->db->exec("CREATE TABLE IF NOT EXISTS dm_player_chats (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, campaign_id BIGINT UNSIGNED NOT NULL, player_id BIGINT UNSIGNED NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE(campaign_id,player_id), INDEX(campaign_id,updated_at)) ENGINE=InnoDB");
+        $this->db->exec("CREATE TABLE IF NOT EXISTS dm_player_chat_messages (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, chat_id BIGINT UNSIGNED NOT NULL, sender_id BIGINT UNSIGNED NOT NULL, message TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, read_by_dm BOOLEAN NOT NULL DEFAULT FALSE, read_by_player BOOLEAN NOT NULL DEFAULT FALSE, INDEX(chat_id,id), INDEX(sender_id,created_at)) ENGINE=InnoDB");
+    }
+    private function ensurePlayerChat(int $campaignId,int $playerId): array
+    {
+        $this->db->prepare('INSERT IGNORE INTO dm_player_chats(campaign_id,player_id) VALUES (?,?)')->execute([$campaignId,$playerId]);$chat=$this->one('SELECT * FROM dm_player_chats WHERE campaign_id=? AND player_id=?',[$campaignId,$playerId]);if(!$chat)throw new RuntimeException('No se pudo abrir el chat.');return $chat;
     }
 
     private function ensureEncounterHealthLogTable(): void
