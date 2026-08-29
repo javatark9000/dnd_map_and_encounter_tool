@@ -16,7 +16,6 @@
 /exports/
 # Private/generated seed data, local scraping utilities, downloaded references, and translation credentials
 /database/private/
-/database/
 /database/res/
 /scripts/private/
 /storage/cache/
