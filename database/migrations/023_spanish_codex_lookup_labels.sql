@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 UPDATE action_categories SET name = CASE code
  WHEN 'spell' THEN 'Hechizo'

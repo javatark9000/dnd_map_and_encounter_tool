@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 CREATE TABLE IF NOT EXISTS creature_types (
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

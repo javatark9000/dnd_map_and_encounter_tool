@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 -- Manual Spanish spell-name corrections for awkward literal machine translations.
 -- Wikidot remains the source, but translated display names are normalized here.

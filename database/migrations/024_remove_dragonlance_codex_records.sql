@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 START TRANSACTION;
 

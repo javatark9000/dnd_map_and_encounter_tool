@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 ALTER TABLE actions
  MODIFY COLUMN short_description TEXT NULL,

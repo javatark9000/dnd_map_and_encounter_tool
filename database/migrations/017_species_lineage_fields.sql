@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 -- Wikidot lineage/species support. Base lineages go into `species`; child lineages/variants
 -- such as Hill Dwarf, High Elf, Draconblood, etc. go into `subspecies`.

@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 -- Remove duplicated SRD 2014 actions when a same-name/same-category SRD 2024 action exists.
 -- Keep 2024 records as canonical. Monster abilities are only considered duplicates when

@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 -- Existing custom Codex records should inherit the media links of their base record.
 -- This keeps custom creatures using the same portrait/token as the source creature by default.

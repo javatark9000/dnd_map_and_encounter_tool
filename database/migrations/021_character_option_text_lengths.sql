@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 ALTER TABLE feats
  MODIFY COLUMN short_description TEXT NULL;

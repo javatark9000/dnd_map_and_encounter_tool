@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 CREATE TABLE IF NOT EXISTS action_class_availability (
  action_id BIGINT UNSIGNED NOT NULL,

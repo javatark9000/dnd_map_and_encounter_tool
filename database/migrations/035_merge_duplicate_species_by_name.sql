@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 -- Fuse duplicate non-custom species records that only differ by source/import row.
 -- Keeps the first active non-custom record per name, preferring a non-null source.

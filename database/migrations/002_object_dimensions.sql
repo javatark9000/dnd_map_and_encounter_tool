@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 ALTER TABLE map_objects
     ADD COLUMN IF NOT EXISTS width_cells TINYINT UNSIGNED NOT NULL DEFAULT 1 AFTER y,

@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 -- Merge mechanically identical non-custom monster abilities into one shared action record.
 -- The owning creatures remain linked through action_assignments.

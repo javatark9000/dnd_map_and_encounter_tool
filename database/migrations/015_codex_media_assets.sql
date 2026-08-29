@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 -- Reusable media layer for codex art, item/object images, creature portraits, VTT tokens, printable minis, etc.
 -- Files are not stored in MariaDB; this stores local paths, external URLs, or object-storage keys plus metadata.

@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 INSERT INTO item_types (system_id, code, name, description)
 SELECT s.id, 'explosive', 'Explosive', 'Explosive items such as bombs, gunpowder, dynamite, and grenades.'

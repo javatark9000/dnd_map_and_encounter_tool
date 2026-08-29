@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 ALTER TABLE backgrounds
  ADD COLUMN IF NOT EXISTS background_type_code VARCHAR(60) NULL AFTER source_page_text,

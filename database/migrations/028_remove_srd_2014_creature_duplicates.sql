@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 -- Remove duplicated SRD 2014 creatures when a same-name SRD 2024 creature exists.
 -- Keep the 2024 creature/monster-ability data as the canonical Codex record.

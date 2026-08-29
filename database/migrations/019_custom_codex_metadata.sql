@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 ALTER TABLE creatures
  ADD COLUMN IF NOT EXISTS custom_identifier VARCHAR(120) NULL AFTER source_page_text,

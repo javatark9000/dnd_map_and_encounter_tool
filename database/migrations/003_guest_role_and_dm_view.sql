@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 ALTER TABLE users MODIFY role ENUM('DM','PLAYER','GUEST') NOT NULL;
 

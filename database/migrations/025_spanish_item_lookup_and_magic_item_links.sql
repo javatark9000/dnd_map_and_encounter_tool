@@ -1,22 +1,4 @@
-USE ttrpg_manager;
-
--- This migration can run before the optional private wondrous-item seed.
-CREATE TABLE IF NOT EXISTS scraped_wondrous_items (
- id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
- category_name VARCHAR(160) NOT NULL,
- item_name VARCHAR(180) NOT NULL,
- rarity VARCHAR(80) NOT NULL,
- rarity_code VARCHAR(80) NOT NULL,
- item_type VARCHAR(120) NULL,
- item_type_code VARCHAR(80) NOT NULL,
- attunement_text VARCHAR(255) NULL,
- requires_attunement BOOLEAN NOT NULL DEFAULT FALSE,
- book_source VARCHAR(180) NULL,
- source_code VARCHAR(40) NULL,
- source_url VARCHAR(500) NOT NULL,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- UNIQUE KEY uq_scraped_wondrous_items (item_name, source_code, rarity_code)
-) ENGINE=InnoDB;
+USE dnd_manager;
 
 UPDATE item_types SET name = CASE code
  WHEN 'adventuring_gear' THEN 'Equipo de aventura'

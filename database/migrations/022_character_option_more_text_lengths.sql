@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 ALTER TABLE species
  MODIFY COLUMN size_text TEXT NULL,

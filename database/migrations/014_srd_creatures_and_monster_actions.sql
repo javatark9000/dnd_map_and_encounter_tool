@@ -1,4 +1,4 @@
-USE ttrpg_manager;
+USE dnd_manager;
 
 -- Extra SRD fields needed to preserve the structured 2014/2024 monster data.
 -- Existing text columns remain the main app-facing fields; these columns keep source fidelity.
